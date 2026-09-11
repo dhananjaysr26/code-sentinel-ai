@@ -116,7 +116,7 @@ def main() -> None:
     reviewer_latencies = metadata.get("reviewer_latencies", {})
 
     print(f"\nReview status: {review_status}")
-    print(f"Findings:      {len(findings_raw)}")
+    print(f"Total Combined Findings: {len(findings_raw)}")
     if errors:
         print(f"Errors:        {errors}")
 
@@ -126,11 +126,15 @@ def main() -> None:
         for k, v in reviewer_latencies.items():
             print(f"  {k}: {v}ms")
 
-    predictions = findings_to_predictions(findings_raw)
+    # Separate LLM and Linter findings
+    llm_findings = [f for f in findings_raw if f.get("source") != "linter"]
+    linter_findings = [f for f in findings_raw if f.get("source") == "linter"]
 
-    # --- Overall Metrics ---
+    predictions = findings_to_predictions(llm_findings)
+
+    # --- Overall LLM Metrics ---
     overall = calculate_metrics(truths, predictions)
-    print_section("OVERALL EVALUATION RESULTS")
+    print_section("OVERALL LLM EVALUATION RESULTS")
     print(f"True Positives:  {overall.true_positives} / {len(truths)}")
     print(f"False Positives: {overall.false_positives}")
     print(f"False Negatives: {overall.false_negatives}")
@@ -138,9 +142,9 @@ def main() -> None:
     print(f"Recall:          {overall.recall:.4f}")
     print(f"F1:              {overall.f1:.4f}")
 
-    # --- Per-Category Metrics ---
+    # --- Per-Category LLM Metrics ---
     by_category = calculate_metrics_by_category(truths, predictions)
-    print_section("PER-CATEGORY RESULTS")
+    print_section("PER-CATEGORY LLM RESULTS")
     for cat, result in sorted(by_category.items()):
         cat_truths = [t for t in truths if t.category == cat]
         cat_preds = [p for p in predictions if p.category == cat]
@@ -148,9 +152,9 @@ def main() -> None:
         print(f"  TP={result.true_positives}/{len(cat_truths)}  FP={result.false_positives}  FN={result.false_negatives}")
         print(f"  Precision: {result.precision:.4f}  Recall: {result.recall:.4f}  F1: {result.f1:.4f}")
 
-    # --- Per-Subcategory Recall ---
+    # --- Per-Subcategory LLM Recall ---
     subcategory_recall = calculate_recall_by_subcategory(truths, predictions)
-    print_section("PER-SUBCATEGORY RECALL")
+    print_section("PER-SUBCATEGORY LLM RECALL")
     for sub, recall in sorted(subcategory_recall.items()):
         bar = "✅" if recall >= 1.0 else ("⚠️ " if recall > 0 else "❌")
         print(f"  {bar} {sub:<25} recall={recall:.4f}")
@@ -160,6 +164,14 @@ def main() -> None:
         print(f"\n--- Matched pairs (truth_id → pred_id) ---")
         for tid, pid in overall.matched_pairs:
             print(f"  {tid} → {pid}")
+            
+    # --- Linter Metrics ---
+    print_section("DETERMINISTIC LINTER RESULTS")
+    print(f"Linter Findings: {len(linter_findings)}")
+    affected_files = len(set(f.get("file") for f in linter_findings))
+    lint_rules = set(f.get("subcategory") for f in linter_findings)
+    print(f"Affected Files:  {affected_files}")
+    print(f"Rules Triggered: {', '.join(lint_rules) if lint_rules else 'None'}")
 
     # --- Write Output ---
     output_path = Path(args.output)
@@ -194,33 +206,43 @@ def main() -> None:
             "models_used": usage_data.get("models_used", []),
         },
         "reviewer_usages": reviewer_usages,
-        "overall": {
-            "findings_count": len(findings_raw),
+        "llm": {
+            "seeded_defects_count": len(truths),
+            "findings_count": len(llm_findings),
             "true_positives": overall.true_positives,
             "false_positives": overall.false_positives,
             "false_negatives": overall.false_negatives,
             "precision": overall.precision,
             "recall": overall.recall,
             "f1": overall.f1,
+            "by_category": {
+                cat: {
+                    "true_positives": r.true_positives,
+                    "false_positives": r.false_positives,
+                    "false_negatives": r.false_negatives,
+                    "precision": r.precision,
+                    "recall": r.recall,
+                    "f1": r.f1,
+                }
+                for cat, r in by_category.items()
+            },
+            "subcategory_recall": subcategory_recall,
+            "matched_pairs": overall.matched_pairs,
         },
-        "by_category": {
-            cat: {
-                "true_positives": r.true_positives,
-                "false_positives": r.false_positives,
-                "false_negatives": r.false_negatives,
-                "precision": r.precision,
-                "recall": r.recall,
-                "f1": r.f1,
-            }
-            for cat, r in by_category.items()
+        "linter": {
+            "finding_count": len(linter_findings),
+            "affected_files": affected_files,
+            "rules_triggered": list(lint_rules),
         },
-        "subcategory_recall": subcategory_recall,
+        "combined": {
+            "total_findings": len(findings_raw),
+        },
         "reviewer_latencies": reviewer_latencies,
-        "matched_pairs": overall.matched_pairs,
         "predictions": [
             {"id": p.id, "file": p.file, "line": p.line,
              "category": p.category, "confidence": p.confidence,
-             "subcategory": p.subcategory, "reviewer": p.reviewer}
+             "subcategory": p.subcategory, "reviewer": p.reviewer,
+             "source": p.source if hasattr(p, 'source') else 'llm'}
             for p in predictions
         ],
         "errors": errors,

@@ -49,6 +49,7 @@ from sentinel.graph.nodes.diff_parser_node import parse_diff_node
 from sentinel.graph.nodes.context_builder_node import build_context_node
 from sentinel.graph.nodes.correctness_reviewer_node import correctness_review_node
 from sentinel.graph.nodes.security_reviewer_node import security_review_node
+from sentinel.graph.nodes.deterministic_checks_node import deterministic_checks_node
 from sentinel.graph.nodes.merge_findings_node import merge_findings_node
 from sentinel.graph.nodes.validate_findings_node import validate_findings_node
 
@@ -68,6 +69,7 @@ def build_review_graph():
     graph.add_node("build_context", build_context_node)
     graph.add_node("correctness_review", correctness_review_node)
     graph.add_node("security_review", security_review_node)
+    graph.add_node("deterministic_checks", deterministic_checks_node)
     graph.add_node("merge_findings", merge_findings_node)
     graph.add_node("validate_findings", validate_findings_node)
 
@@ -75,20 +77,22 @@ def build_review_graph():
     graph.add_edge(START, "parse_diff")
     graph.add_edge("parse_diff", "build_context")
 
-    # Fan-out: both reviewers start simultaneously after build_context
+    # Fan-out: reviewers and checks start simultaneously after build_context
     graph.add_edge("build_context", "correctness_review")
     graph.add_edge("build_context", "security_review")
+    graph.add_edge("build_context", "deterministic_checks")
 
-    # Fan-in: merge waits for both reviewers to complete
+    # Fan-in: merge waits for all to complete
     graph.add_edge("correctness_review", "merge_findings")
     graph.add_edge("security_review", "merge_findings")
+    graph.add_edge("deterministic_checks", "merge_findings")
 
     # Final validation gate
     graph.add_edge("merge_findings", "validate_findings")
     graph.add_edge("validate_findings", END)
 
     compiled = graph.compile()
-    logger.debug("Review graph compiled: 6 nodes (correctness + security in parallel)")
+    logger.debug("Review graph compiled: 7 nodes (correctness + security + deterministic checks in parallel)")
     return compiled
 
 

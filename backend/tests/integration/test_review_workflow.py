@@ -103,15 +103,26 @@ async def test_full_workflow_with_mocked_llm(temp_git_repo):
     mock_structured_llm = AsyncMock()
     mock_structured_llm.ainvoke = AsyncMock(return_value=mock_review_findings)
 
-    mock_llm = MagicMock()
-    mock_llm.with_structured_output = MagicMock(return_value=mock_structured_llm)
-
     # Mock MCP client to avoid requiring a running MCP server
     mock_mcp_read = AsyncMock(return_value="1: def hello():\n2:     pass\n")
 
+    mock_usage = MagicMock()
+    mock_usage.input_tokens = 100
+    mock_usage.output_tokens = 100
+    mock_usage.latency_ms = 1000
+    mock_usage.estimated_cost = 0.01
+    mock_usage.provider = "mock"
+    mock_usage.model = "mock"
+    
+    mock_result = MagicMock()
+    mock_result.response = mock_review_findings
+    mock_result.usage = mock_usage
+
     with (
-        patch("sentinel.graph.nodes.correctness_reviewer_node.ChatOpenAI", return_value=mock_llm),
+        patch("sentinel.graph.nodes.correctness_reviewer_node.invoke_structured", new_callable=AsyncMock, return_value=mock_result),
+        patch("sentinel.graph.nodes.security_reviewer_node.invoke_structured", new_callable=AsyncMock, return_value=mock_result),
         patch("sentinel.graph.nodes.context_builder_node.StdioMCPClient") as MockMCP,
+        patch("sentinel.graph.nodes.deterministic_checks_node.StdioMCPClient", new=MockMCP),
     ):
         mock_mcp_instance = AsyncMock()
         mock_mcp_instance.read_file = mock_mcp_read

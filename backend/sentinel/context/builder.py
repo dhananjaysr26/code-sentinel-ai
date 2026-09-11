@@ -113,7 +113,12 @@ class ContextBuilder:
         """Build one ContextBlock for one hunk.
         
         Fetches surrounding lines via MCP. Falls back to hunk-only if MCP fails.
+        Also attempts to identify the changed symbol and fetches its references
+        via the find_references MCP tool, adding them to the context to aid the LLM.
         """
+        import re
+        import json
+        
         window = self.budget.window_lines
         start_line = max(1, hunk.new_start - window)
         end_line = hunk.new_start + hunk.new_count + window
@@ -125,6 +130,41 @@ class ContextBuilder:
                 start_line=start_line,
                 end_line=end_line,
             )
+            
+            # Extract symbol from diff hunk header
+            # Pattern matches e.g. @@ ... @@ def parse(self... -> "parse"
+            symbol_match = re.search(r"@@.*?@@.*?(?:(?:async\s+)?def|class)\s+([a-zA-Z_][a-zA-Z0-9_]*)", hunk.hunk_text)
+            if symbol_match:
+                symbol = symbol_match.group(1)
+                
+                # Fetch references using the new MCP tool
+                try:
+                    ref_output = await self.mcp_client.find_references(repo_path, symbol)
+                    ref_data = json.loads(ref_output)
+                    refs = ref_data.get("references", [])
+                    
+                    if refs:
+                        MAX_REFERENCES = 5  # Cap the number of retrieved references to prevent context blowout
+                        refs = refs[:MAX_REFERENCES]
+                        
+                        surrounding_code += f"\n\n--- Usage References for '{symbol}' (max {MAX_REFERENCES}) ---\n"
+                        for ref in refs:
+                            ref_file = ref.get('file')
+                            ref_line = ref.get('line')
+                            ref_kind = ref.get('kind')
+                            
+                            # Read a small bounded context around the reference
+                            ref_code = await self.mcp_client.read_file(
+                                repo_path=repo_path,
+                                file_path=ref_file,
+                                start_line=max(1, ref_line - 2),
+                                end_line=ref_line + 2,
+                            )
+                            surrounding_code += f"\nFile: {ref_file} | Line: {ref_line} | Kind: {ref_kind}\n"
+                            surrounding_code += f"{ref_code}\n"
+                except Exception as ref_exc:
+                    logger.warning("find_references failed or parsing failed for %s: %s", symbol, ref_exc)
+                    
         except Exception as exc:
             logger.warning(
                 "MCP read_file failed for %s (L%d-L%d): %s. Using hunk-only context.",

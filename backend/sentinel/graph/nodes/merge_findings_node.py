@@ -42,7 +42,7 @@ def _dedup_within_category(findings: list[dict]) -> list[dict]:
     """Deduplicate findings within the same category using file+line proximity.
 
     Greedy: iterate in order, skip any finding that is within ±LINE_DEDUP_TOLERANCE
-    lines of an already-kept finding in the same file+category.
+    lines of an already-kept finding in the same file+category+source+subcategory.
     Keeps the higher-confidence finding when two are equivalent.
     """
     kept: list[dict] = []
@@ -50,16 +50,22 @@ def _dedup_within_category(findings: list[dict]) -> list[dict]:
         c_file = _normalize_path(candidate.get("file", ""))
         c_line = candidate.get("line") or 0
         c_category = candidate.get("category", "")
+        c_source = candidate.get("source", "")
+        c_subcategory = candidate.get("subcategory", "")
 
         duplicate = False
         for i, existing in enumerate(kept):
             e_file = _normalize_path(existing.get("file", ""))
             e_line = existing.get("line") or 0
             e_category = existing.get("category", "")
+            e_source = existing.get("source", "")
+            e_subcategory = existing.get("subcategory", "")
 
             if (
                 c_file == e_file
                 and c_category == e_category
+                and c_source == e_source
+                and c_subcategory == e_subcategory
                 and abs(c_line - e_line) <= _LINE_DEDUP_TOLERANCE
             ):
                 # Duplicate found — keep the higher-confidence one
@@ -86,33 +92,35 @@ def _rank(findings: list[dict]) -> list[dict]:
 
 
 async def merge_findings_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Fan-in node: merge findings from both parallel reviewers.
+    """Fan-in node: merge findings from both parallel reviewers and deterministic checks.
 
-    Input:  correctness_raw_findings, security_raw_findings
+    Input:  correctness_raw_findings, security_raw_findings, deterministic_raw_findings
     Output: raw_findings (merged, deduped, ranked)
     """
     start = time.monotonic()
 
     correctness = list(state.get("correctness_raw_findings") or [])
     security = list(state.get("security_raw_findings") or [])
+    deterministic = list(state.get("deterministic_raw_findings") or [])
 
     logger.info(
-        "MERGE_START correctness_count=%d security_count=%d",
-        len(correctness), len(security),
+        "MERGE_START correctness_count=%d security_count=%d deterministic_count=%d",
+        len(correctness), len(security), len(deterministic)
     )
 
     # Separate by category before deduplication
     # (never deduplicate across categories)
     deduped_correctness = _dedup_within_category(correctness)
     deduped_security = _dedup_within_category(security)
+    deduped_deterministic = _dedup_within_category(deterministic)
 
     # Combine and rank globally
-    merged = _rank(deduped_correctness + deduped_security)
+    merged = _rank(deduped_correctness + deduped_security + deduped_deterministic)
 
     duration_ms = round((time.monotonic() - start) * 1000)
     logger.info(
-        "MERGE_COMPLETE total_findings=%d correctness=%d security=%d latency_ms=%d",
-        len(merged), len(deduped_correctness), len(deduped_security), duration_ms,
+        "MERGE_COMPLETE llm_findings=%d deterministic_findings=%d final_findings=%d latency_ms=%d",
+        len(deduped_correctness) + len(deduped_security), len(deduped_deterministic), len(merged), duration_ms,
     )
 
     return {"raw_findings": merged}

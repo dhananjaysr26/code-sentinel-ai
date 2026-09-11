@@ -33,6 +33,20 @@ class MCPClientInterface(ABC):
     ) -> str:
         """Read a line range from a file in the repository."""
         ...
+        
+    @abstractmethod
+    async def find_references(
+        self, repo_path: str, symbol: str, path: str = None
+    ) -> str:
+        """Find usages/references to a symbol."""
+        ...
+        
+    @abstractmethod
+    async def run_linter(
+        self, repo_path: str, path: str
+    ) -> str:
+        """Run a deterministic lint tool against a repository file."""
+        ...
 
 
 class StdioMCPClient(MCPClientInterface):
@@ -52,6 +66,14 @@ class StdioMCPClient(MCPClientInterface):
         """
         self.server_script = server_script
         logger.debug("StdioMCPClient initialized with server: %s", server_script)
+        
+        # Track number of MCP calls to support observability
+        self.call_stats = {
+            "get_diff": 0,
+            "read_file": 0,
+            "find_references": 0,
+            "run_linter": 0
+        }
 
     async def _call_tool(self, tool_name: str, arguments: dict) -> str:
         """Execute one MCP tool call via stdio transport.
@@ -71,11 +93,14 @@ class StdioMCPClient(MCPClientInterface):
         """
         from mcp import ClientSession, StdioServerParameters
         from mcp.client.stdio import stdio_client
+        import sys
 
         server_params = StdioServerParameters(
-            command="python",
+            command=sys.executable,
             args=[self.server_script],
         )
+        
+        self.call_stats[tool_name] = self.call_stats.get(tool_name, 0) + 1
 
         try:
             async with stdio_client(server_params) as (read, write):
@@ -125,3 +150,61 @@ class StdioMCPClient(MCPClientInterface):
                 "end_line": end_line,
             },
         )
+
+    async def find_references(
+        self, repo_path: str, symbol: str, path: str = None
+    ) -> str:
+        """Find usages/references to a symbol via MCP server."""
+        import time
+        start_time = time.monotonic()
+        logger.info(f"FIND_REFERENCES_START symbol={symbol}")
+        
+        args = {"repo_path": repo_path, "symbol": symbol}
+        if path:
+            args["path"] = path
+            
+        result = await self._call_tool("find_references", args)
+        
+        latency_ms = int((time.monotonic() - start_time) * 1000)
+        
+        import json
+        try:
+            data = json.loads(result)
+            count = data.get("count", 0)
+            if "error" in data:
+                logger.error(f"FIND_REFERENCES_COMPLETE symbol={symbol} error={data['error']} latency_ms={latency_ms}")
+            else:
+                logger.info(f"FIND_REFERENCES_COMPLETE symbol={symbol} count={count} latency_ms={latency_ms}")
+        except json.JSONDecodeError:
+            logger.info(f"FIND_REFERENCES_COMPLETE symbol={symbol} latency_ms={latency_ms}")
+            
+        return result
+
+    async def run_linter(
+        self, repo_path: str, path: str
+    ) -> str:
+        """Run a deterministic lint tool via MCP server."""
+        import time
+        start_time = time.monotonic()
+        logger.info(f"LINTER_START path={path} tool=ruff")
+        
+        result = await self._call_tool(
+            "run_linter",
+            {
+                "repo_path": repo_path,
+                "path": path,
+            },
+        )
+        
+        latency_ms = int((time.monotonic() - start_time) * 1000)
+        
+        import json
+        try:
+            data = json.loads(result)
+            success = data.get("success", False)
+            issue_count = data.get("issue_count", 0)
+            logger.info(f"LINTER_COMPLETE path={path} issues={issue_count} latency_ms={latency_ms} success={str(success).lower()}")
+        except json.JSONDecodeError:
+            logger.info(f"LINTER_COMPLETE path={path} latency_ms={latency_ms} success=false")
+            
+        return result

@@ -186,6 +186,160 @@ def read_file(repo_path: str, file_path: str, start_line: int, end_line: int) ->
         return f"ERROR: {exc}"
 
 
+import json
+import time
+
+@mcp.tool()
+def find_references(repo_path: str, symbol: str, path: str = None) -> str:
+    """Find usages/references to a symbol in the configured repository.
+    
+    Args:
+        repo_path: Absolute path to the local git repository.
+        symbol: The symbol to search for (function, class, variable, etc).
+        path: Optional specific file path to search within. If omitted, searches the whole repository's Python files.
+        
+    Returns:
+        JSON string containing the symbol, a list of references, and the count.
+    """
+    try:
+        if not symbol or not isinstance(symbol, str):
+            return json.dumps({"error": "symbol must be a non-empty string"})
+        
+        repo = _validate_repo(repo_path)
+        
+        from ast_utils import find_references_in_file
+        
+        all_refs = []
+        if path:
+            full_path = _validate_file_path(repo, path)
+            rel_path = str(full_path.relative_to(repo))
+            if rel_path.endswith(".py"):
+                refs = find_references_in_file(str(full_path), symbol)
+                for r in refs:
+                    r["file"] = rel_path
+                all_refs.extend(refs)
+        else:
+            # Search all Python files
+            for p in repo.rglob("*.py"):
+                # skip hidden dirs or .venv
+                if ".venv" in p.parts or p.name.startswith(".") or any(part.startswith(".") for part in p.parts):
+                    continue
+                rel_path = str(p.relative_to(repo))
+                refs = find_references_in_file(str(p), symbol)
+                for r in refs:
+                    r["file"] = rel_path
+                all_refs.extend(refs)
+                
+        return json.dumps({
+            "symbol": symbol,
+            "references": all_refs,
+            "count": len(all_refs)
+        })
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)})
+    except Exception as exc:
+        return json.dumps({"error": f"Internal error: {exc}"})
+
+
+@mcp.tool()
+def run_linter(repo_path: str, path: str) -> str:
+    """Run a deterministic lint/static-analysis tool against a repository file.
+    
+    Args:
+        repo_path: Absolute path to the local git repository.
+        path: File path relative to repository root to lint.
+        
+    Returns:
+        JSON string containing structured lint issues.
+    """
+    try:
+        repo = _validate_repo(repo_path)
+        full_path = _validate_file_path(repo, path)
+        
+        # We only support Python files with ruff for now
+        if not path.endswith(".py"):
+            return json.dumps({
+                "path": path,
+                "success": False,
+                "issues": [],
+                "issue_count": 0,
+                "tool": "ruff",
+                "error": {"type": "UnsupportedFile", "message": "Only .py files are supported"}
+            })
+            
+        # Use ruff from the backend virtualenv if available, or globally
+        # Because MCP server might be run from backend/.venv, we'll try to just call `ruff`
+        # and fallback to a specific path if needed, but standard `ruff` in PATH works if activated.
+        # Alternatively, we can use `sys.executable -m ruff`.
+        cmd = [sys.executable, "-m", "ruff", "check", "--output-format=json", str(full_path)]
+        
+        result = subprocess.run(cmd, cwd=repo, capture_output=True, text=True)
+        
+        # ruff check returns 0 if no violations, 1 if violations found, >1 if error
+        if result.returncode > 1 and not result.stdout.strip():
+            return json.dumps({
+                "path": path,
+                "success": False,
+                "issues": [],
+                "issue_count": 0,
+                "tool": "ruff",
+                "error": {"type": "ExecutionFailed", "message": result.stderr.strip()}
+            })
+            
+        try:
+            output_json = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            # Maybe no issues and empty output, though ruff usually outputs []
+            if not result.stdout.strip():
+                output_json = []
+            else:
+                return json.dumps({
+                    "path": path,
+                    "success": False,
+                    "issues": [],
+                    "issue_count": 0,
+                    "tool": "ruff",
+                    "error": {"type": "ParseFailed", "message": "Failed to parse ruff output"}
+                })
+                
+        issues = []
+        for item in output_json:
+            issues.append({
+                "line": item.get("location", {}).get("row"),
+                "column": item.get("location", {}).get("column"),
+                "code": item.get("code"),
+                "severity": "warning",  # ruff doesn't strongly distinguish severity in default json, usually all are issues
+                "message": item.get("message")
+            })
+            
+        return json.dumps({
+            "path": path,
+            "success": True,
+            "issues": issues,
+            "issue_count": len(issues),
+            "tool": "ruff"
+        })
+        
+    except ValueError as exc:
+        return json.dumps({
+            "path": path,
+            "success": False,
+            "issues": [],
+            "issue_count": 0,
+            "tool": "ruff",
+            "error": {"type": "ValidationError", "message": str(exc)}
+        })
+    except Exception as exc:
+        return json.dumps({
+            "path": path,
+            "success": False,
+            "issues": [],
+            "issue_count": 0,
+            "tool": "ruff",
+            "error": {"type": "InternalError", "message": str(exc)}
+        })
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":

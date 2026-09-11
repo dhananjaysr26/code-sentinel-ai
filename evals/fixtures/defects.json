@@ -81,12 +81,30 @@
     "severity": "HIGH"
   },
   {
-    "id": "defect-010",
-    "category": "security",
-    "subcategory": "input_validation",
-    "file": "src/db.py",
-    "expected_line": 70,
-    "description": "Unsafe input: user-controlled request data used without validation",
+    "id": "defect-011",
+    "category": "numeric_business_logic",
+    "subcategory": "float_equality",
+    "file": "src/billing.py",
+    "expected_line": 6,
+    "description": "Floating-point equality is used for monetary values.",
     "severity": "MEDIUM"
+  },
+  {
+    "id": "defect-012",
+    "category": "concurrency",
+    "subcategory": "race_condition",
+    "file": "src/inventory.py",
+    "expected_line": 13,
+    "description": "Read-modify-write without lock or atomic transaction.",
+    "severity": "HIGH"
+  },
+  {
+    "id": "defect-013",
+    "category": "security",
+    "subcategory": "path_traversal",
+    "file": "src/files.py",
+    "expected_line": 5,
+    "description": "Unsanitized filename allows path traversal.",
+    "severity": "CRITICAL"
   }
 ]

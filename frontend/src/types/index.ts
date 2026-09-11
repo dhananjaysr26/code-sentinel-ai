@@ -73,6 +73,7 @@ export interface Review {
 export interface OverviewStats {
   total_reviews: number;
   total_findings: number;
+  linter_findings?: number;
   accepted: number;
   dismissed: number;
   unreviewed: number;

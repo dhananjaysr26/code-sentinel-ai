@@ -199,3 +199,34 @@ code-sentinel-ai/
 ├── FINDINGS.md           Evaluation results and limitations
 └── README.md             This file
 ```
+
+## MCP Tools
+CodeSentinel uses the Model Context Protocol to access the local repository safely.
+The MCP server exposes the following tools:
+- `get_diff(repo_path, base_ref, target_ref)`: Gets the unified diff.
+- `read_file(repo_path, file_path, start_line, end_line)`: Reads lines from a file.
+- `find_references(repo_path, symbol, [path])`: Deterministically finds usages, calls, and imports of a symbol in the Python codebase using AST analysis.
+- `run_linter(repo_path, path)`: Executes a static analysis tool (`ruff`) on the specified Python file and returns structured issues.
+
+### Example MCP Calls
+```json
+// find_references
+{
+  "symbol": "process_payment",
+  "references": [
+    {"file": "src/checkout.py", "line": 45, "column": 12, "kind": "call"}
+  ],
+  "count": 1
+}
+
+// run_linter
+{
+  "path": "src/db.py",
+  "success": true,
+  "issues": [
+    {"line": 34, "column": 12, "code": "E501", "severity": "warning", "message": "Line too long"}
+  ],
+  "issue_count": 1,
+  "tool": "ruff"
+}
+```

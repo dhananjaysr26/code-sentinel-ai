@@ -286,3 +286,41 @@ START
 ```
 
 The current graph topology makes this a straightforward extension.
+
+### MCP Tool: find_references
+- **Purpose**: Retrieves deterministic usages, definitions, and references for a changed symbol to build an intelligent, bounded context for the LLM.
+- **Why it exists**: Context window budgets are tight, and naive full-repo RAG retrieval adds significant noise and latency. By looking up exactly where a changed function or class is defined and called, the context builder provides exactly the right files.
+- **How it works**: Uses Python's native `ast` module to accurately identify function definitions, class definitions, method calls, direct calls, and imports across all `.py` files in the repository.
+- **Limitations**: As a deterministic AST visitor without full language server resolution, it cannot resolve complex dynamic imports, type-inferred reflection, or aliases reliably. It is designed to be fast and accurate enough for contextual hint-building, not perfect language intelligence.
+
+### MCP Tool: run_linter
+- **Purpose**: Executes a deterministic static analysis tool (`ruff`) against a modified repository file.
+- **Why it exists**: LLMs are probabilistic and sometimes hallucinate syntax errors or miss simple violations. A deterministic linter runs much faster and catches objective errors reliably.
+- **Execution model**: Executes `ruff check --output-format=json` via subprocess, avoiding `shell=True` to prevent shell injection.
+- **Structured output**: Parses the linter JSON output and normalizes it into standard `Finding` objects with `source="linter"` and `reviewer="deterministic"`.
+- **Failure handling**: Distinguishes between parsing errors, execution failures, and successful zero-issue outputs.
+
+### Context Engineering
+The context building flow now integrates symbol reference retrieval:
+1. `parse_diff`
+2. Extract changed symbol from diff hunk header
+3. **Reference retrieval**: Call `find_references(symbol)` via MCP
+4. **Relevant source**: Read a small window around a maximum of 5 retrieved references.
+5. **Bounded context**: Append this usage data to the main context block, ensuring the LLM understands how the changed function is used elsewhere.
+This deterministic reference traversal guarantees exact matches and is vastly superior to generic vector RAG, which might return conceptually similar but unrelated code.
+
+### Deterministic vs Probabilistic Review
+- **LLM Reviewers** (Correctness, Security) use probabilistic reasoning to identify semantic flaws.
+- **Linter / Deterministic Checks** use static analysis.
+- Both streams fan out in parallel and are unified during the **merge** phase. Deduplication carefully considers the `source` and `subcategory` to ensure linter findings are not incorrectly discarded when they overlap with distinct LLM findings.
+
+### LLM vs Deterministic Evaluation
+Our evaluation architecture creates a strict separation between probabilistic logic evaluation and deterministic linting:
+- **Seeded defects are the golden truth.** We maintain exactly 12 known seeded defects across 4 distinct categories (`correctness`, `security`, `numeric_business_logic`, `concurrency`).
+- **LLM findings are evaluated against that truth.** A true positive is an LLM finding that matches a seeded defect. A false positive is a hallucinated defect.
+- **Linter findings are deterministic product findings.** They are generated automatically by static analysis (`ruff`).
+- **Linter output is not treated as an LLM prediction.** If the linter flags "unused variable", it is an operational finding, but it does not count as detecting a golden-set defect, nor does it count as an LLM hallucination (FP). 
+- **We keep the two measurement streams separate to avoid corrupting precision/recall.** By mixing linter warnings with LLM detections, our LLM score would be artificially inflated or penalized.
+
+**UI Integration:**
+Despite being separate for evaluation, Linter findings *can still appear in the actual review UI*. The product aggregates findings from all sources (LLM and Linter) so developers see a unified dashboard. The UI explicitly separates the source using a dedicated tag (`Linter`) rather than masquerading as AI-generated output.

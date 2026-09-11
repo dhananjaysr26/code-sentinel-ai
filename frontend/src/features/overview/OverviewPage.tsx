@@ -10,7 +10,7 @@ import { toast } from "../../components/Toast";
 import { formatDistanceToNow } from "../../utils/time";
 import {
   GitBranch, CheckCircle2, XCircle, AlertCircle,
-  BarChart3, Trash2, Users, FlaskConical,
+  BarChart3, Trash2, Users, FlaskConical, Code2,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -323,8 +323,8 @@ export function OverviewPage() {
 
       {/* ── KPI cards ─────────────────────────────────────────────── */}
       {isLoading ? (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
-          {[1, 2, 3, 4].map((i) => <MetricCardSkeleton key={i} />)}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-5">
+          {[1, 2, 3, 4, 5].map((i) => <MetricCardSkeleton key={i} />)}
         </div>
       ) : error ? (
         <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700" role="alert">
@@ -333,8 +333,8 @@ export function OverviewPage() {
         </div>
       ) : data ? (
         <>
-          {/* Row 1: 4 KPI tiles */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+          {/* Row 1: 5 KPI tiles */}
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-5">
             <MetricCard
               label="Total reviews"
               value={data.total_reviews}
@@ -348,6 +348,13 @@ export function OverviewPage() {
               icon={BarChart3}
               iconBg="bg-slate-100"
               iconColor="text-slate-500"
+            />
+            <MetricCard
+              label="Linter findings"
+              value={data.linter_findings ?? 0}
+              icon={Code2}
+              iconBg="bg-blue-50"
+              iconColor="text-blue-500"
             />
             <MetricCard
               label="Accepted"

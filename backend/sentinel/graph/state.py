@@ -59,6 +59,9 @@ class ReviewState(TypedDict):
 
     # ── Populated by security_review node (parallel) ─────────────────────────
     security_raw_findings: list[dict]
+    
+    # ── Populated by deterministic_checks node (parallel) ──────────────────────
+    deterministic_raw_findings: list[dict]
 
     # ── Written by BOTH parallel reviewers — needs append reducer ────────────
     errors: Annotated[list[str], add]

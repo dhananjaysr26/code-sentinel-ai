@@ -45,7 +45,7 @@ def get_llm(provider: str):
         return ChatOpenAI(
             model=settings.OPENAI_MODEL,
             temperature=0,
-            api_key=settings.OPENAI_API_KEY or "dummy",
+            api_key=settings.OPENAI_API_KEY,
         )
 
 def _normalize_usage(provider: str, model: str, raw_msg: Any, latency_ms: int) -> LLMUsage:
@@ -99,24 +99,33 @@ async def invoke_structured(
     structured_llm = llm.with_structured_output(schema, include_raw=True)
 
     start_time = time.monotonic()
-    try:
-        result = await structured_llm.ainvoke(messages)
-        latency_ms = int((time.monotonic() - start_time) * 1000)
-        
-        parsed = result.get("parsed")
-        raw = result.get("raw")
-        
-        usage = _normalize_usage(provider, model_name, raw, latency_ms)
-        return LLMInvocationResult(response=parsed, usage=usage)
-        
-    except Exception as e:
-        latency_ms = int((time.monotonic() - start_time) * 1000)
-        logger.error(f"LLM invocation failed: {e}")
-        usage = LLMUsage(
-            provider=provider,
-            model=model_name,
-            latency_ms=latency_ms,
-            status="failed",
-        )
-        raise RuntimeError(f"LLM error: {str(e)}", usage)
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            result = await structured_llm.ainvoke(messages)
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+            
+            parsed = result.get("parsed")
+            raw = result.get("raw")
+            
+            usage = _normalize_usage(provider, model_name, raw, latency_ms)
+            return LLMInvocationResult(response=parsed, usage=usage)
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                import asyncio
+                logger.warning(f"LLM invocation failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in 2s...")
+                await asyncio.sleep(2 * (attempt + 1))
+                continue
+                
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+            logger.error(f"LLM invocation failed permanently after {max_retries} attempts: {e}")
+            usage = LLMUsage(
+                provider=provider,
+                model=model_name,
+                latency_ms=latency_ms,
+                status="failed",
+            )
+            raise RuntimeError(f"LLM error: {str(e)}", usage)
 

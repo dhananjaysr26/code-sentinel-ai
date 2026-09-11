@@ -1,6 +1,6 @@
 import type { Finding } from "../types";
 import { BlockRenderer } from "./BlockRenderer";
-import { Check, X, User } from "lucide-react";
+import { Check, X, User, Code2 } from "lucide-react";
 import { toast } from "./Toast";
 
 interface FindingCardProps {
@@ -66,15 +66,25 @@ export function FindingCard({ finding, onStatusChange, isSelected, onClick }: Fi
 
       {/* ── Footer: reviewer tag + actions ─────────────────────────── */}
       <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/70 flex items-center justify-between gap-3">
-        {/* Reviewer */}
+        {/* Reviewer or Linter */}
         <div className="flex items-center gap-1.5 text-xs text-slate-400">
-          {finding.reviewer ? (
+          {finding.source === "linter" ? (
+            <>
+              <Code2 size={11} aria-hidden />
+              <span className="capitalize font-medium">Linter</span>
+              {finding.subcategory && (
+                <span className="ml-1 text-slate-500 font-mono px-1.5 py-0.5 bg-slate-100 rounded-sm">
+                  {finding.subcategory}
+                </span>
+              )}
+            </>
+          ) : finding.reviewer ? (
             <>
               <User size={11} aria-hidden />
-              <span className="capitalize font-medium">{finding.reviewer}</span>
+              <span className="capitalize font-medium">{finding.reviewer} Reviewer</span>
             </>
           ) : (
-            <span className="text-slate-300">—</span>
+            <span>Unknown Reviewer</span>
           )}
         </div>
 

@@ -27,6 +27,9 @@ class Category(str, Enum):
     """
     CORRECTNESS = "correctness"
     SECURITY = "security"
+    CODE_QUALITY = "code_quality"
+    NUMERIC_BUSINESS_LOGIC = "numeric_business_logic"
+    CONCURRENCY = "concurrency"
 
 
 class Source(str, Enum):

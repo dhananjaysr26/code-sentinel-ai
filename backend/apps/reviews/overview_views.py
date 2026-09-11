@@ -67,20 +67,30 @@ class OverviewView(APIView):
         total_calls = usage_stats["total_calls"] or 0
 
         # Evaluation quality — computed from seeded findings feedback
+        # But we must exclude linter from LLM precision/recall metrics.
+        llm_findings = ReviewFinding.objects.exclude(source="linter")
+        llm_total = llm_findings.count()
+        llm_accepted = llm_findings.filter(feedback="accept").count()
+        llm_dismissed = llm_findings.filter(feedback="dismiss").count()
+        
+        # Fake seeded stats from DB if any (real evals are run separately)
         seeded = ReviewFinding.objects.filter(source="seeded")
         seeded_total = seeded.count()
         seeded_detected = seeded.filter(feedback="accept").count()
 
-        precision = round((accepted / (accepted + dismissed) * 100), 1) if (accepted + dismissed) > 0 else 0.0
-        recall = round((accepted / total_findings * 100), 1) if total_findings > 0 else 0.0
+        precision = round((llm_accepted / (llm_accepted + llm_dismissed) * 100), 1) if (llm_accepted + llm_dismissed) > 0 else 0.0
+        recall = round((llm_accepted / llm_total * 100), 1) if llm_total > 0 else 0.0
         f1 = round(
             (2 * precision * recall / (precision + recall)), 1
         ) if (precision + recall) > 0 else 0.0
+
+        linter_count = ReviewFinding.objects.filter(source="linter").count()
 
         return Response(
             {
                 "total_reviews": total_reviews,
                 "total_findings": total_findings,
+                "linter_findings": linter_count,
                 "accepted": accepted,
                 "dismissed": dismissed,
                 "unreviewed": unreviewed,
