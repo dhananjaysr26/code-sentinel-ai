@@ -1,0 +1,42 @@
+[
+  {
+    "id": "defect-001",
+    "category": "correctness",
+    "file": "src/user.py",
+    "expected_line": 42,
+    "description": "NoneType dereference: user.profile accessed without None check",
+    "severity": "HIGH"
+  },
+  {
+    "id": "defect-002",
+    "category": "correctness",
+    "file": "src/calculator.py",
+    "expected_line": 8,
+    "description": "Off-by-one: range(len(items)+1) causes IndexError on last iteration",
+    "severity": "HIGH"
+  },
+  {
+    "id": "defect-003",
+    "category": "correctness",
+    "file": "src/auth.py",
+    "expected_line": 9,
+    "description": "Inverted boolean: level < required_level grants access when it should deny",
+    "severity": "CRITICAL"
+  },
+  {
+    "id": "defect-004",
+    "category": "correctness",
+    "file": "src/file_handler.py",
+    "expected_line": 19,
+    "description": "Resource leak: file handle not closed on json.JSONDecodeError path",
+    "severity": "MEDIUM"
+  },
+  {
+    "id": "defect-005",
+    "category": "correctness",
+    "file": "src/parser.py",
+    "expected_line": 33,
+    "description": "KeyError: config[\"database\"] accessed without .get() or key check",
+    "severity": "HIGH"
+  }
+]

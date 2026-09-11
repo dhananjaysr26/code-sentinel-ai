@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Secrets
+.env
+
+# Django
+backend/db.sqlite3
+backend/staticfiles/
+backend/media/
+
+# Node / React
+frontend/node_modules/
+frontend/.pnpm-store/
+frontend/dist/
+
+# Evaluation results (not committed — contains run-specific data)
+evals/results/*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

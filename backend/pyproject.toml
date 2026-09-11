@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "code-sentinel-ai"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "django>=4.2,<5.0",
+    "djangorestframework>=3.15,<4.0",
+    "django-cors-headers>=4.3",
+    "pydantic>=2.7,<3.0",
+    "openai>=1.30",
+    "langgraph>=0.2",
+    "langchain>=0.2",
+    "langchain-openai>=0.1",
+    "mcp>=1.0",
+    "unidiff>=0.7",
+    "python-dotenv>=1.0",
+    "tiktoken>=0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-django>=4.8",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.14",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+pythonpath = ["."]
+asyncio_mode = "auto"

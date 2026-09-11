@@ -1,0 +1,12 @@
+[
+  {
+    "id": "clean-001",
+    "description": "Refactor: extract helper function with no logic change",
+    "file": "src/utils.py"
+  },
+  {
+    "id": "clean-002",
+    "description": "Add docstring to existing function; no logic change",
+    "file": "src/models.py"
+  }
+]

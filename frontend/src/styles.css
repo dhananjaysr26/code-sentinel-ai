@@ -1,0 +1,114 @@
+/* CodeSentinel AI — minimal functional styles */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f5f5f5;
+  color: #1a1a1a;
+  line-height: 1.5;
+}
+
+/* Layout */
+.review-page { min-height: 100vh; }
+.app-header {
+  background: #1e293b;
+  color: white;
+  padding: 1.5rem 2rem;
+}
+.app-header h1 { font-size: 1.5rem; }
+.app-header p { color: #94a3b8; font-size: 0.875rem; margin-top: 0.25rem; }
+.app-main { max-width: 900px; margin: 0 auto; padding: 2rem 1rem; }
+
+/* Form */
+.review-form { background: white; border-radius: 8px; padding: 2rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.review-form h2 { margin-bottom: 1.5rem; }
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; font-weight: 600; font-size: 0.875rem; margin-bottom: 0.375rem; }
+.form-group input {
+  width: 100%; padding: 0.5rem 0.75rem;
+  border: 1px solid #d1d5db; border-radius: 6px;
+  font-size: 0.875rem; font-family: monospace;
+}
+.form-group small { display: block; color: #6b7280; font-size: 0.75rem; margin-top: 0.25rem; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 1.25rem; border: none; border-radius: 6px;
+  font-size: 0.875rem; font-weight: 600; cursor: pointer;
+  transition: opacity 0.15s;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: #2563eb; color: white; margin-top: 0.75rem; }
+.btn-secondary { background: #e5e7eb; color: #374151; }
+.btn-accept { background: #16a34a; color: white; }
+.btn-dismiss { background: #dc2626; color: white; }
+
+/* Status */
+.status-text { color: #6b7280; font-size: 0.875rem; margin-top: 0.75rem; }
+.error-box {
+  background: #fef2f2; border: 1px solid #fecaca;
+  border-radius: 6px; padding: 1rem; margin-top: 1rem; color: #dc2626;
+}
+.error-text { color: #dc2626; font-size: 0.75rem; }
+
+/* Review results */
+.review-results { display: flex; flex-direction: column; gap: 1.5rem; }
+.review-results__header {
+  background: white; border-radius: 8px; padding: 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  display: flex; align-items: flex-start; justify-content: space-between;
+}
+.review-meta-grid {
+  display: grid; grid-template-columns: auto 1fr; gap: 0.375rem 1rem; margin-top: 1rem;
+}
+.meta-label { font-weight: 600; font-size: 0.8rem; color: #6b7280; align-self: center; }
+.meta-value { font-family: monospace; font-size: 0.8rem; word-break: break-all; }
+.status-pill {
+  display: inline-block; padding: 0.125rem 0.5rem; border-radius: 9999px;
+  font-size: 0.75rem; font-weight: 600;
+}
+.status-pill--completed { background: #dcfce7; color: #15803d; }
+.status-pill--failed { background: #fef2f2; color: #dc2626; }
+.status-pill--running { background: #dbeafe; color: #1d4ed8; }
+
+/* Findings */
+.no-findings { background: #f0fdf4; border-radius: 8px; padding: 1.5rem; text-align: center; color: #15803d; }
+.findings-list { display: flex; flex-direction: column; gap: 1rem; }
+.findings-list h3 { font-size: 1rem; color: #374151; }
+
+/* Finding card */
+.finding-card {
+  background: white; border-radius: 8px;
+  border-left: 4px solid #d1d5db;
+  padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.finding-card--critical { border-left-color: #7c3aed; }
+.finding-card--high { border-left-color: #dc2626; }
+.finding-card--medium { border-left-color: #d97706; }
+.finding-card--low { border-left-color: #2563eb; }
+
+.finding-card__header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem; }
+.finding-card__confidence { font-size: 0.75rem; color: #6b7280; margin-left: auto; }
+.finding-card__title { font-size: 1rem; font-weight: 600; margin-bottom: 0.375rem; }
+.finding-card__location { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.75rem; }
+.finding-card__explanation { font-size: 0.875rem; margin-bottom: 0.75rem; }
+.finding-card__evidence {
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px;
+  padding: 0.75rem; font-size: 0.8rem; overflow-x: auto; margin-bottom: 0.75rem;
+}
+.finding-card__fix { font-size: 0.875rem; margin-bottom: 0.75rem; }
+.finding-card__fix p { margin-top: 0.25rem; color: #374151; }
+.finding-card__actions { display: flex; align-items: center; gap: 0.5rem; margin-top: 1rem; }
+.finding-card__feedback-label { font-size: 0.875rem; font-weight: 600; color: #374151; }
+
+/* Badges */
+.badge {
+  display: inline-block; padding: 0.125rem 0.5rem; border-radius: 4px;
+  font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em;
+}
+.badge-critical { background: #ede9fe; color: #7c3aed; }
+.badge-high { background: #fef2f2; color: #dc2626; }
+.badge-medium { background: #fffbeb; color: #d97706; }
+.badge-low { background: #eff6ff; color: #2563eb; }

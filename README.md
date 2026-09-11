@@ -1,0 +1,186 @@
+# CodeSentinel AI
+
+AI-powered code review and evaluation platform. Reviews a Git diff and produces
+structured correctness findings through a LangGraph orchestration pipeline.
+
+## Architecture
+
+```
+User
+  │
+  ▼
+React (TypeScript + Vite)          ← http://localhost:5173
+  │  POST /api/reviews/
+  ▼
+Django REST Framework              ← http://localhost:8000
+  │
+  ▼
+ReviewOrchestrator
+  │
+  ▼
+LangGraph Workflow
+  ├── parse_diff     (GitService + DiffParser — no LLM)
+  ├── build_context  (MCP client → MCP server → repo)
+  ├── correctness_review  (OpenAI structured output)
+  └── validate_findings   (Pydantic schema gate)
+        │
+        ▼
+   ReviewFinding[] → Django ORM → React UI
+```
+
+### MCP Data Path
+
+```
+LangGraph (build_context node)
+  → StdioMCPClient
+    → MCP server (mcp_server/server.py, stdio transport)
+      → Git CLI / filesystem (local repository)
+```
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Django 4.2 + DRF |
+| Agent | LangGraph 0.2 |
+| LLM | OpenAI (gpt-4o, configurable) |
+| Tool protocol | MCP (stdio) |
+| Validation | Pydantic v2 |
+| Frontend | React 18 + TypeScript + Vite |
+| Server state | @tanstack/react-query |
+| Database | SQLite |
+| Package mgmt | pip + venv (backend), pnpm (frontend) |
+
+## Prerequisites
+
+- Python 3.11+
+- Node.js 18+ and pnpm
+- git
+- An OpenAI API key
+
+## Installation
+
+### 1. Backend
+
+```bash
+cd backend
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 2. Frontend
+
+```bash
+cd frontend
+pnpm install
+```
+
+## Environment Variables
+
+```bash
+cp .env.example backend/.env
+# Edit backend/.env and set:
+#   OPENAI_API_KEY=sk-...
+#   DJANGO_SECRET_KEY=...
+#   MCP_SERVER_SCRIPT=/absolute/path/to/mcp_server/server.py
+```
+
+## Running
+
+### Step 1: Start MCP Server (test it)
+```bash
+# The MCP server is launched automatically by the Django app for each review.
+# To test it standalone:
+python mcp_server/server.py
+```
+> The MCP server runs as a subprocess — you don't need to keep it running manually.
+
+### Step 2: Start Django
+
+```bash
+cd backend
+source .venv/bin/activate
+python manage.py migrate
+python manage.py runserver
+```
+
+### Step 3: Start React
+
+```bash
+cd frontend
+pnpm dev
+```
+
+Open http://localhost:5173
+
+## Example Review Request
+
+```bash
+curl -X POST http://localhost:8000/api/reviews/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_path": "/absolute/path/to/evals/seed_repo",
+    "base_ref": "HEAD~1",
+    "target_ref": "HEAD"
+  }'
+```
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | /api/reviews/ | Trigger a review |
+| GET | /api/reviews/{id}/ | Get review + findings |
+| POST | /api/reviews/{id}/findings/{fid}/feedback/ | Accept or dismiss |
+
+## Running the Evaluation
+
+```bash
+# Ensure Django is running, then:
+cd /path/to/code-sentinel-ai
+python evals/run_eval.py --repo-path evals/seed_repo
+# Results written to: evals/results/eval_results.json
+```
+
+## Running Stability Test
+
+```bash
+python evals/stability_test.py --repo-path evals/seed_repo --runs 3
+# Results written to: evals/results/stability_results.json
+```
+
+## Running Tests
+
+```bash
+cd backend
+source .venv/bin/activate
+pytest tests/ -v
+```
+
+## Project Structure
+
+```
+code-sentinel-ai/
+├── backend/
+│   ├── config/           Django settings, urls, wsgi
+│   ├── apps/reviews/     Django models, serializers, views, urls
+│   ├── sentinel/
+│   │   ├── graph/        LangGraph workflow, state, nodes
+│   │   ├── context/      ContextBuilder
+│   │   ├── mcp/          MCP client interface
+│   │   ├── schemas/      Pydantic schemas (findings, diff, context)
+│   │   └── services/     GitService, DiffParser, Deduplicator, Orchestrator
+│   └── tests/            Unit + integration tests
+├── mcp_server/           MCP server (get_diff, read_file tools)
+├── frontend/             React + TypeScript UI
+├── evals/
+│   ├── fixtures/         Ground truth defects + clean diffs
+│   ├── seed_repo/        Pre-initialized git repo with seeded bugs
+│   ├── metrics.py        Precision/recall calculation
+│   ├── run_eval.py       Evaluation runner
+│   └── stability_test.py Stability (nondeterminism) test
+├── DESIGN.md             Architecture decisions
+├── FINDINGS.md           Evaluation results and limitations
+└── README.md             This file
+```

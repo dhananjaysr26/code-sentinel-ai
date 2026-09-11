@@ -1,0 +1,3 @@
+Watching for file changes with StatReloader
+2026-09-10 06:02:25,608 INFO django.utils.autoreload Watching for file changes with StatReloader
+2026-09-10 06:02:26,955 DEBUG sentinel.graph.workflow Review graph compiled: 4 nodes
