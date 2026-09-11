@@ -164,13 +164,38 @@ def main() -> None:
     # --- Write Output ---
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    usage_data = review_data.get("usage", {})
+    reviewer_usages = review_data.get("reviewer_usage", [])
+    
+    # Print Usage Summary
+    if usage_data:
+        print_section("LLM USAGE METRICS")
+        print(f"Total Tokens:    {usage_data.get('total_tokens')}")
+        print(f"Latency:         {usage_data.get('total_latency_ms')} ms")
+        print(f"Estimated Cost:  ${usage_data.get('total_estimated_cost')}")
+        print(f"LLM Calls:       {usage_data.get('llm_calls')}")
+        print(f"Provider:        {usage_data.get('provider')}")
+        print(f"Models:          {', '.join(usage_data.get('models_used', []))}")
+
     output_data = {
         "review_id": review_data.get("id"),
         "repo_path": args.repo_path,
         "base_ref": args.base_ref,
         "target_ref": args.target_ref,
         "status": review_status,
+        "usage": {
+            "input_tokens": usage_data.get("total_input_tokens", 0),
+            "output_tokens": usage_data.get("total_output_tokens", 0),
+            "total_tokens": usage_data.get("total_tokens", 0),
+            "latency_ms": usage_data.get("total_latency_ms", 0),
+            "estimated_cost": usage_data.get("total_estimated_cost"),
+            "provider": usage_data.get("provider", ""),
+            "models_used": usage_data.get("models_used", []),
+        },
+        "reviewer_usages": reviewer_usages,
         "overall": {
+            "findings_count": len(findings_raw),
             "true_positives": overall.true_positives,
             "false_positives": overall.false_positives,
             "false_negatives": overall.false_negatives,

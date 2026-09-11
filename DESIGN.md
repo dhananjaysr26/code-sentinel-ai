@@ -226,6 +226,51 @@ These are enumerated here so the absence is deliberate, not an oversight.
 
 ---
 
+## Observability & Usage Tracking
+
+### Provider-Agnostic Usage Tracking
+
+CodeSentinel AI captures LLM usage metrics (tokens, latency, estimated cost) in a provider-agnostic manner.
+The application logic does not contain provider-specific UI checks (e.g., `if provider == "bedrock"`).
+
+Instead, provider responses are mapped through an adapter in the central LLM service:
+- **Bedrock Converse API** → `invoke_structured` / `llm_service` → `LLMUsage`
+- **OpenAI API** → `invoke_structured` / `llm_service` → `LLMUsage`
+
+The graph nodes (and eventually the UI) only interact with the normalized `LLMUsage` object.
+
+### Token accounting
+
+The application tracks:
+- **Input Tokens** (prompt)
+- **Output Tokens** (completion)
+- **Total Tokens** (input + output)
+
+These are extracted directly from the provider's official usage metadata returned in the API response. We do not use manual character or word count estimations when official metadata is available.
+
+### Cost
+
+Cost is an estimate calculated based on a centralized, configurable pricing table (`ModelPricing`). 
+The formula is:
+```
+input_cost = (input_tokens / 1,000,000) * input_price
+output_cost = (output_tokens / 1,000,000) * output_price
+estimated_cost = input_cost + output_cost
+```
+If pricing for a specific model is missing, `estimated_cost` gracefully defaults to `null` and is displayed as "N/A" in the UI, ensuring the application does not crash.
+
+### Latency
+
+We measure end-to-end LLM application latency using a monotonic clock (`time.monotonic()`) wrapped around the API call. 
+- **Reviewer Latency:** Measured individually for each parallel node (e.g., correctness, security).
+- **Total Review Latency:** Measured for the entire review orchestration process (start to finish), capturing the true wall-clock time rather than a simple sum of parallel nodes.
+
+### Why this design?
+
+Normalizing usage metrics inside the LLM service layer prevents duplicated instrumentation logic across reviewer nodes. It ensures the frontend UI remains strictly decoupled from backend provider details. Storing both review-level summaries (`ReviewUsage`) and detailed per-call metrics (`LLMCallUsage`) allows us to present high-level operational metrics on the Overview page while preserving diagnostic granularity for individual parallel reviewers.
+
+---
+
 ## Future Evolution (P1)
 
 ```

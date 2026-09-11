@@ -1,7 +1,5 @@
-"""DRF serializers for Review and ReviewFinding models."""
 from rest_framework import serializers
-from .models import Review, ReviewFinding
-
+from .models import Review, ReviewFinding, ReviewUsage, LLMCallUsage
 
 class ReviewFindingSerializer(serializers.ModelSerializer):
     class Meta:
@@ -13,15 +11,27 @@ class ReviewFindingSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["id", "created_at"]
 
+class LLMCallUsageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LLMCallUsage
+        exclude = ["review", "id", "created_at"]
+
+class ReviewUsageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReviewUsage
+        exclude = ["review", "id", "created_at"]
 
 class ReviewSerializer(serializers.ModelSerializer):
     findings = ReviewFindingSerializer(many=True, read_only=True)
+    usage = ReviewUsageSerializer(read_only=True)
+    reviewer_usage = LLMCallUsageSerializer(many=True, read_only=True)
 
     class Meta:
         model = Review
         fields = [
             "id", "repo_path", "base_ref", "target_ref", "status",
             "raw_diff", "errors", "review_metadata", "findings",
+            "usage", "reviewer_usage",
             "created_at", "updated_at",
         ]
         read_only_fields = ["id", "status", "raw_diff", "errors",

@@ -228,6 +228,57 @@ export function ReviewResultsPage() {
             </ul>
           </div>
 
+          {/* Review Metrics */}
+          {review.usage && (
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-3 pb-3 border-b border-slate-100">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Review Metrics</p>
+                <span className="ml-auto text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono font-semibold uppercase">{review.usage.provider}</span>
+              </div>
+              <div className="space-y-2 mb-4 text-sm text-slate-600">
+                <div className="flex justify-between">
+                  <span>LLM Calls</span>
+                  <span className="font-mono font-medium text-slate-900">{review.usage.llm_calls}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Total Tokens</span>
+                  <span className="font-mono font-medium text-slate-900">{review.usage.total_tokens.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Latency</span>
+                  <span className="font-mono font-medium text-slate-900">{(review.usage.total_latency_ms / 1000).toFixed(1)}s</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Est. Cost</span>
+                  <span className="font-mono font-medium text-slate-900">
+                    {review.usage.total_estimated_cost !== null 
+                      ? `$${review.usage.total_estimated_cost.toFixed(4)}`
+                      : "N/A"}
+                  </span>
+                </div>
+              </div>
+              
+              {review.reviewer_usage && review.reviewer_usage.length > 0 && (
+                <details className="group border-t border-slate-100 pt-3">
+                  <summary className="text-xs font-semibold text-slate-500 cursor-pointer hover:text-slate-700 select-none flex items-center justify-between">
+                    LLM Usage Details
+                    <span className="text-slate-400 group-open:rotate-180 transition-transform">▼</span>
+                  </summary>
+                  <div className="mt-3 space-y-3">
+                    {review.reviewer_usage.map((u, i) => (
+                      <div key={i} className="text-xs">
+                        <div className="font-medium text-slate-700 capitalize">{u.reviewer}</div>
+                        <div className="text-slate-500 font-mono mt-0.5">
+                          {u.total_tokens.toLocaleString()} tokens · {(u.latency_ms / 1000).toFixed(1)}s · {u.estimated_cost !== null ? `$${u.estimated_cost.toFixed(4)}` : "N/A"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+
           {/* Agent pipeline */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
             <ReviewerPipeline isRunning={false} />

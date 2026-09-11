@@ -73,3 +73,36 @@ class ReviewFinding(models.Model):
 
     def __str__(self) -> str:
         return f"Finding({self.id}, {self.severity}, {self.file}:{self.line})"
+
+class ReviewUsage(models.Model):
+    """Aggregate usage metadata for a review."""
+    review = models.OneToOneField(Review, related_name="usage", on_delete=models.CASCADE)
+    provider = models.CharField(max_length=64)
+    total_input_tokens = models.IntegerField(default=0)
+    total_output_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+    total_latency_ms = models.IntegerField(default=0)
+    total_estimated_cost = models.FloatField(null=True, blank=True)
+    llm_calls = models.IntegerField(default=0)
+    models_used = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"Usage({self.review_id}, {self.total_tokens} tokens)"
+
+class LLMCallUsage(models.Model):
+    """Usage details for a specific LLM invocation during a review."""
+    review = models.ForeignKey(Review, related_name="reviewer_usage", on_delete=models.CASCADE)
+    reviewer = models.CharField(max_length=64)
+    provider = models.CharField(max_length=64)
+    model = models.CharField(max_length=128)
+    input_tokens = models.IntegerField(default=0)
+    output_tokens = models.IntegerField(default=0)
+    total_tokens = models.IntegerField(default=0)
+    latency_ms = models.IntegerField(default=0)
+    estimated_cost = models.FloatField(null=True, blank=True)
+    status = models.CharField(max_length=32, default="success")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self) -> str:
+        return f"CallUsage({self.reviewer}, {self.total_tokens} tokens)"

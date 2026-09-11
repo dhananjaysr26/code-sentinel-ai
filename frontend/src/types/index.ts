@@ -31,6 +31,29 @@ export interface ReviewFinding {
 
 export interface Finding extends ReviewFinding {}
 
+export interface LLMCallUsage {
+  reviewer: string;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  latency_ms: number;
+  estimated_cost: number | null;
+  status: string;
+}
+
+export interface ReviewUsage {
+  provider: string;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_tokens: number;
+  total_latency_ms: number;
+  total_estimated_cost: number | null;
+  llm_calls: number;
+  models_used: string[];
+}
+
 export interface Review {
   id: string;
   repo_path: string;
@@ -41,6 +64,8 @@ export interface Review {
   raw_diff?: string;
   errors?: string[];
   review_metadata?: Record<string, unknown>;
+  usage?: ReviewUsage;
+  reviewer_usage?: LLMCallUsage[];
   created_at: string;
   updated_at?: string;
 }
@@ -54,6 +79,12 @@ export interface OverviewStats {
   acceptance_rate: number;
   severity_distribution: Record<string, number>;
   reviewer_distribution: Record<string, number>;
+  usage_metrics?: {
+    avg_tokens: number;
+    avg_latency_s: number;
+    avg_cost: number | null;
+    total_calls: number;
+  };
   evaluation: {
     precision: number;
     recall: number;

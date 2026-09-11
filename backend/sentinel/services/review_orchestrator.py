@@ -36,14 +36,15 @@ class ReviewOrchestrator:
         base_ref: str,
         target_ref: str,
         llm_provider: str = "openai",
-    ) -> tuple[list[Finding], list[str], dict]:
+    ) -> tuple[list[Finding], list[str], dict, list[dict]]:
         """Execute the full review workflow asynchronously.
 
         Returns:
-            (findings, errors, metadata) tuple.
+            (findings, errors, metadata, llm_usages) tuple.
             findings: validated, deduplicated Finding objects.
             errors: list of non-fatal error messages encountered.
             metadata: timing, node durations, finding count.
+            llm_usages: list of LLM usage tracking dictionaries.
         """
         logger.info(
             "[%s] Review starting — repo=%s base=%s target=%s",
@@ -63,6 +64,9 @@ class ReviewOrchestrator:
             "raw_findings": [],
             "findings": [],
             "errors": [],
+            "security_errors": [],
+            "llm_usages": [],
+            "reviewer_latencies": {},
             "metadata": {
                 "review_id": review_id,
                 "start_time": datetime.now(timezone.utc).isoformat(),
@@ -88,6 +92,7 @@ class ReviewOrchestrator:
             final_state.get("findings", []),
             final_state.get("errors", []),
             metadata,
+            final_state.get("llm_usages", []),
         )
 
     def run_review_sync(
@@ -97,7 +102,7 @@ class ReviewOrchestrator:
         base_ref: str,
         target_ref: str,
         llm_provider: str = "openai",
-    ) -> tuple[list[Finding], list[str], dict]:
+    ) -> tuple[list[Finding], list[str], dict, list[dict]]:
         """Synchronous wrapper for use from Django sync views.
 
         Uses asyncio.run() to execute the async workflow.

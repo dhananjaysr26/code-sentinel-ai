@@ -51,6 +51,21 @@ LangGraph (build_context node)
 | Database | SQLite |
 | Package mgmt | pip + venv (backend), pnpm (frontend) |
 
+## Observability & LLM Usage Tracking
+
+CodeSentinel AI tracks and persists detailed operational metrics for all LLM calls:
+- **Tokens:** Input (prompt), Output (completion), and Total tokens.
+- **Latency:** Measured application-side for accurate end-to-end timing.
+- **Estimated Cost:** Automatically computed using a centralized pricing table.
+- **Reviewer Usage:** Detailed metrics per reviewer (e.g. Correctness, Security) allowing analysis of parallel execution performance.
+
+### Supported Providers
+- **Amazon Bedrock:** Analyzes the provider's `amazon-bedrock-invocationMetrics` metadata.
+- **OpenAI:** Uses standard `usage_metadata` extracted from the structured LLM response.
+
+### Pricing Configuration
+Pricing is configured in `backend/sentinel/services/pricing.py`. To add a new model, simply add its input and output prices per 1M tokens to the `MODEL_PRICING` dictionary. If a model's pricing is missing, the application will gracefully return `null` for the estimated cost, and the UI will display "N/A" without breaking the review flow.
+
 ## Prerequisites
 
 - Python 3.11+
