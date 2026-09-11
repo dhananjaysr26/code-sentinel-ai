@@ -61,6 +61,8 @@ class ReviewFinding(models.Model):
     evidence = models.TextField()
     suggested_fix = models.TextField(blank=True, null=True)
     source = models.CharField(max_length=32, default="llm")
+    subcategory = models.CharField(max_length=100, blank=True, default="")
+    reviewer = models.CharField(max_length=50, blank=True, default="")
     feedback = models.CharField(
         max_length=16, choices=Feedback.choices, default=Feedback.NONE
     )

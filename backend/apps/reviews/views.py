@@ -76,12 +76,14 @@ class ReviewListCreateView(APIView):
                     line=finding.line,
                     title=finding.title,
                     category=finding.category.value,
+                    subcategory=finding.subcategory or "",
                     severity=finding.severity.value,
                     confidence=finding.confidence,
                     explanation=finding.explanation,
                     evidence=finding.evidence,
                     suggested_fix=finding.suggested_fix,
                     source=finding.source.value,
+                    reviewer=finding.reviewer or "",
                 )
                 db_findings.append(db_finding)
 

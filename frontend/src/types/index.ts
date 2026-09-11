@@ -4,7 +4,7 @@
  */
 
 export type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-export type Category = "correctness";
+export type Category = "correctness" | "security";
 export type Source = "llm" | "linter" | "ast";
 export type ReviewStatus = "pending" | "running" | "completed" | "failed";
 export type FeedbackAction = "accept" | "dismiss" | "none";
@@ -15,12 +15,14 @@ export interface ReviewFinding {
   line: number | null;
   title: string;
   category: Category;
+  subcategory: string | null;
   severity: Severity;
   confidence: number;
   explanation: string;
   evidence: string;
   suggested_fix: string | null;
   source: Source;
+  reviewer: string | null;
   feedback: FeedbackAction;
   created_at: string;
 }

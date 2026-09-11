@@ -2,6 +2,7 @@
   {
     "id": "defect-001",
     "category": "correctness",
+    "subcategory": "null_dereference",
     "file": "src/user.py",
     "expected_line": 42,
     "description": "NoneType dereference: user.profile accessed without None check",
@@ -10,6 +11,7 @@
   {
     "id": "defect-002",
     "category": "correctness",
+    "subcategory": "off_by_one",
     "file": "src/calculator.py",
     "expected_line": 8,
     "description": "Off-by-one: range(len(items)+1) causes IndexError on last iteration",
@@ -18,6 +20,7 @@
   {
     "id": "defect-003",
     "category": "correctness",
+    "subcategory": "logic_error",
     "file": "src/auth.py",
     "expected_line": 9,
     "description": "Inverted boolean: level < required_level grants access when it should deny",
@@ -26,6 +29,7 @@
   {
     "id": "defect-004",
     "category": "correctness",
+    "subcategory": "resource_leak",
     "file": "src/file_handler.py",
     "expected_line": 19,
     "description": "Resource leak: file handle not closed on json.JSONDecodeError path",
@@ -34,9 +38,55 @@
   {
     "id": "defect-005",
     "category": "correctness",
+    "subcategory": "missing_key_check",
     "file": "src/parser.py",
     "expected_line": 33,
     "description": "KeyError: config[\"database\"] accessed without .get() or key check",
     "severity": "HIGH"
+  },
+  {
+    "id": "defect-006",
+    "category": "security",
+    "subcategory": "sql_injection",
+    "file": "src/db.py",
+    "expected_line": 28,
+    "description": "SQL injection: user_id is interpolated directly into raw SQL query string",
+    "severity": "CRITICAL"
+  },
+  {
+    "id": "defect-007",
+    "category": "security",
+    "subcategory": "command_injection",
+    "file": "src/db.py",
+    "expected_line": 42,
+    "description": "Command injection: user-controlled filename passed to os.system without sanitization",
+    "severity": "CRITICAL"
+  },
+  {
+    "id": "defect-008",
+    "category": "security",
+    "subcategory": "secret_exposure",
+    "file": "src/db.py",
+    "expected_line": 10,
+    "description": "Hardcoded secret: production API key committed in source code",
+    "severity": "HIGH"
+  },
+  {
+    "id": "defect-009",
+    "category": "security",
+    "subcategory": "authorization",
+    "file": "src/db.py",
+    "expected_line": 57,
+    "description": "Missing authorization: admin report endpoint has no role/permission check",
+    "severity": "HIGH"
+  },
+  {
+    "id": "defect-010",
+    "category": "security",
+    "subcategory": "input_validation",
+    "file": "src/db.py",
+    "expected_line": 70,
+    "description": "Unsafe input: user-controlled request data used without validation",
+    "severity": "MEDIUM"
   }
 ]

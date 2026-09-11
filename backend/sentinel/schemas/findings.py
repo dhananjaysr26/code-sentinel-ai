@@ -21,11 +21,12 @@ class Severity(str, Enum):
 
 class Category(str, Enum):
     """Which type of reviewer produced this finding.
-    
-    MVP only: CORRECTNESS.
-    Future: SECURITY, PERFORMANCE, STYLE.
+
+    Phase 1: CORRECTNESS + SECURITY (parallel reviewers).
+    Future: PERFORMANCE, STYLE.
     """
     CORRECTNESS = "correctness"
+    SECURITY = "security"
 
 
 class Source(str, Enum):
@@ -56,6 +57,15 @@ class Finding(BaseModel):
     evidence: str = Field(description="The specific code snippet that demonstrates the issue")
     suggested_fix: Optional[str] = Field(default=None, description="Concrete fix suggestion")
     source: Source = Field(default=Source.LLM)
+    # Phase 2 fields — optional for full backward compatibility
+    subcategory: Optional[str] = Field(
+        default=None,
+        description="Fine-grained subcategory, e.g. 'sql_injection', 'off_by_one'",
+    )
+    reviewer: Optional[str] = Field(
+        default=None,
+        description="Which reviewer node produced this: 'correctness' or 'security'",
+    )
 
     @field_validator("confidence")
     @classmethod

@@ -25,8 +25,9 @@ from pathlib import Path
 import requests
 
 _EVALS_DIR = Path(__file__).parent
+_PROJECT_ROOT = _EVALS_DIR.parent
 API_BASE = os.environ.get("CODESENTINEL_API", "http://localhost:8000")
-DEFAULT_REPO = str(_EVALS_DIR / "seed_repo")
+DEFAULT_REPO = str(_PROJECT_ROOT.parent / "seed_repo")
 
 
 def run_review(repo_path: str, base_ref: str, target_ref: str) -> tuple[dict, float]:

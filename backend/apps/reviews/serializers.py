@@ -7,9 +7,9 @@ class ReviewFindingSerializer(serializers.ModelSerializer):
     class Meta:
         model = ReviewFinding
         fields = [
-            "id", "file", "line", "title", "category",
+            "id", "file", "line", "title", "category", "subcategory",
             "severity", "confidence", "explanation", "evidence",
-            "suggested_fix", "source", "feedback", "created_at",
+            "suggested_fix", "source", "reviewer", "feedback", "created_at",
         ]
         read_only_fields = ["id", "created_at"]
 
