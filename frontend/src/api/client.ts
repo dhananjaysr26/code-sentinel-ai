@@ -9,6 +9,7 @@ import type {
   FeedbackRequest,
   Review,
   ReviewFinding,
+  OverviewStats,
 } from "../types";
 
 const BASE_URL = "http://localhost:8000/api";
@@ -16,7 +17,16 @@ const BASE_URL = "http://localhost:8000/api";
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`API error ${res.status}: ${body}`);
+    let message = `API error ${res.status}`;
+    try {
+      const parsed = JSON.parse(body);
+      message = parsed?.errors
+        ? Object.values(parsed.errors).flat().join(", ")
+        : parsed?.error ?? message;
+    } catch {
+      message = body || message;
+    }
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }
@@ -44,6 +54,14 @@ export const reviewsApi = {
   },
 
   /**
+   * GET /api/reviews/list/ — List all reviews (most recent first).
+   */
+  listReviews: async (): Promise<Review[]> => {
+    const res = await fetch(`${BASE_URL}/reviews/list/`);
+    return handleResponse<Review[]>(res);
+  },
+
+  /**
    * POST /api/reviews/{id}/findings/{fid}/feedback/ — Record accept/dismiss.
    */
   submitFeedback: async (
@@ -60,5 +78,26 @@ export const reviewsApi = {
       }
     );
     return handleResponse<ReviewFinding>(res);
+  },
+};
+
+export const overviewApi = {
+  /**
+   * GET /api/overview/ — Aggregate statistics.
+   */
+  getOverview: async (): Promise<OverviewStats> => {
+    const res = await fetch(`${BASE_URL}/overview/`);
+    return handleResponse<OverviewStats>(res);
+  },
+
+  /**
+   * POST /api/overview/reset/ — Delete all reviews and findings.
+   */
+  reset: async (): Promise<{ deleted_reviews: number; deleted_findings: number }> => {
+    const res = await fetch(`${BASE_URL}/overview/reset/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    });
+    return handleResponse(res);
   },
 };

@@ -1,45 +1,4 @@
-/**
- * TypeScript types matching the backend API schema.
- * These types are the single source of truth for the frontend/backend contract.
- */
-
-export type Severity = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-export type Category = "correctness" | "security";
-export type Source = "llm" | "linter" | "ast";
-export type ReviewStatus = "pending" | "running" | "completed" | "failed";
-export type FeedbackAction = "accept" | "dismiss" | "none";
-
-export interface ReviewFinding {
-  id: string;
-  file: string;
-  line: number | null;
-  title: string;
-  category: Category;
-  subcategory: string | null;
-  severity: Severity;
-  confidence: number;
-  explanation: string;
-  evidence: string;
-  suggested_fix: string | null;
-  source: Source;
-  reviewer: string | null;
-  feedback: FeedbackAction;
-  created_at: string;
-}
-
-export interface Review {
-  id: string;
-  repo_path: string;
-  base_ref: string;
-  target_ref: string;
-  status: ReviewStatus;
-  raw_diff: string;
-  errors: string[];
-  review_metadata: Record<string, unknown>;
-  findings: ReviewFinding[];
-  created_at: string;
-  updated_at: string;
-}
+export type Severity = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW";
 
 export interface CreateReviewRequest {
   repo_path: string;
@@ -50,4 +9,56 @@ export interface CreateReviewRequest {
 
 export interface FeedbackRequest {
   action: "accept" | "dismiss";
+}
+
+export interface ReviewFinding {
+  id: string;
+  file: string;
+  line: number | null;
+  title: string;
+  category: string;
+  subcategory?: string;
+  reviewer?: string;
+  severity: Severity;
+  confidence: number;
+  explanation: string;
+  evidence: string;
+  suggested_fix?: string;
+  source: string;
+  feedback?: "none" | "accept" | "dismiss";
+  created_at?: string;
+}
+
+export interface Finding extends ReviewFinding {}
+
+export interface Review {
+  id: string;
+  repo_path: string;
+  base_ref: string;
+  target_ref: string;
+  status: "pending" | "running" | "completed" | "failed";
+  findings: Finding[];
+  raw_diff?: string;
+  errors?: string[];
+  review_metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface OverviewStats {
+  total_reviews: number;
+  total_findings: number;
+  accepted: number;
+  dismissed: number;
+  unreviewed: number;
+  acceptance_rate: number;
+  severity_distribution: Record<string, number>;
+  reviewer_distribution: Record<string, number>;
+  evaluation: {
+    precision: number;
+    recall: number;
+    f1: number;
+    seeded_total: number;
+    seeded_detected: number;
+  };
 }
