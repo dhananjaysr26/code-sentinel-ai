@@ -9,7 +9,9 @@ from sentinel.schemas.findings import ReviewFindings
 from sentinel.services.llm_service import invoke_structured
 
 logger = logging.getLogger(__name__)
+from langsmith import traceable
 
+@traceable(name="correctness_reviewer_node")
 async def correctness_review_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Analyzes the diff and context to find correctness bugs."""
     start_time = time.monotonic()

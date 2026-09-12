@@ -41,6 +41,7 @@ class Source(str, Enum):
     LLM = "llm"
     LINTER = "linter"
     AST = "ast"
+    MERGED = "merged"
 
 
 class Finding(BaseModel):
@@ -68,6 +69,10 @@ class Finding(BaseModel):
     reviewer: Optional[str] = Field(
         default=None,
         description="Which reviewer node produced this: 'correctness' or 'security'",
+    )
+    evidence_sources: list[str] = Field(
+        default_factory=list,
+        description="If merged, contains origins e.g. ['llm', 'linter']",
     )
 
     @field_validator("confidence")

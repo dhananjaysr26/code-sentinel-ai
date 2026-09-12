@@ -83,6 +83,9 @@ def _normalize_usage(provider: str, model: str, raw_msg: Any, latency_ms: int) -
         estimated_cost=estimated_cost,
     )
 
+from langsmith import traceable
+
+@traceable(run_type="llm", name="invoke_structured_output")
 async def invoke_structured(
     provider: str, 
     messages: List[BaseMessage], 

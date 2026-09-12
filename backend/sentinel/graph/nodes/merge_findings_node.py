@@ -38,46 +38,59 @@ def _normalize_path(path: str) -> str:
     return path
 
 
-def _dedup_within_category(findings: list[dict]) -> list[dict]:
+def _dedup_within_category(findings: list[dict]) -> tuple[list[dict], int]:
     """Deduplicate findings within the same category using file+line proximity.
 
     Greedy: iterate in order, skip any finding that is within ±LINE_DEDUP_TOLERANCE
-    lines of an already-kept finding in the same file+category+source+subcategory.
-    Keeps the higher-confidence finding when two are equivalent.
+    lines of an already-kept finding in the same file+category.
+    Keeps the higher-confidence finding when two are equivalent,
+    and merges provenance (source/evidence_sources).
     """
     kept: list[dict] = []
+    removed_count = 0
+    
     for candidate in findings:
         c_file = _normalize_path(candidate.get("file", ""))
         c_line = candidate.get("line") or 0
         c_category = candidate.get("category", "")
-        c_source = candidate.get("source", "")
-        c_subcategory = candidate.get("subcategory", "")
 
         duplicate = False
         for i, existing in enumerate(kept):
             e_file = _normalize_path(existing.get("file", ""))
             e_line = existing.get("line") or 0
             e_category = existing.get("category", "")
-            e_source = existing.get("source", "")
-            e_subcategory = existing.get("subcategory", "")
 
             if (
                 c_file == e_file
                 and c_category == e_category
-                and c_source == e_source
-                and c_subcategory == e_subcategory
                 and abs(c_line - e_line) <= _LINE_DEDUP_TOLERANCE
             ):
-                # Duplicate found — keep the higher-confidence one
+                # Duplicate found — keep the higher-confidence one, but merge provenance
+                c_source = candidate.get("source", "llm")
+                e_source = existing.get("source", "llm")
+                
+                c_sources = candidate.get("evidence_sources", [c_source] if c_source != "merged" else [])
+                e_sources = existing.get("evidence_sources", [e_source] if e_source != "merged" else [])
+                
+                merged_sources = list(set(c_sources + e_sources))
+                
                 if candidate.get("confidence", 0) > existing.get("confidence", 0):
+                    candidate["source"] = "merged" if len(merged_sources) > 1 else c_source
+                    candidate["evidence_sources"] = merged_sources
                     kept[i] = candidate
+                else:
+                    existing["source"] = "merged" if len(merged_sources) > 1 else e_source
+                    existing["evidence_sources"] = merged_sources
+                    kept[i] = existing
+                    
                 duplicate = True
+                removed_count += 1
                 break
 
         if not duplicate:
             kept.append(candidate)
 
-    return kept
+    return kept, removed_count
 
 
 def _rank(findings: list[dict]) -> list[dict]:
@@ -103,24 +116,40 @@ async def merge_findings_node(state: Dict[str, Any]) -> Dict[str, Any]:
     security = list(state.get("security_raw_findings") or [])
     deterministic = list(state.get("deterministic_raw_findings") or [])
 
-    logger.info(
-        "MERGE_START correctness_count=%d security_count=%d deterministic_count=%d",
-        len(correctness), len(security), len(deterministic)
-    )
+    logger.info("--- MERGE LAYER METRICS ---")
+    logger.info("raw correctness findings: %d", len(correctness))
+    logger.info("raw security findings: %d", len(security))
+    logger.info("raw linter findings: %d", len(deterministic))
+    
+    total_inputs = len(correctness) + len(security) + len(deterministic)
+    logger.info("dedupe input count: %d", total_inputs)
 
     # Separate by category before deduplication
     # (never deduplicate across categories)
-    deduped_correctness = _dedup_within_category(correctness)
-    deduped_security = _dedup_within_category(security)
-    deduped_deterministic = _dedup_within_category(deterministic)
+    # Combine them first, then dedup by category globally?
+    # Wait, the prompt says deduplicate them together so LLM and Linter merge.
+    # We should merge correctness + deterministic, and security + deterministic?
+    # No, just pass all of them into _dedup_within_category!
+    # Linter can have CODE_QUALITY which LLMs don't typically produce right now unless prompted,
+    # but if they share a category, they will merge.
+    
+    all_findings = correctness + security + deterministic
+    
+    deduped_findings, removed = _dedup_within_category(all_findings)
+    
+    logger.info("dedupe output count: %d", len(deduped_findings))
+    logger.info("findings removed because of deduplication: %d", removed)
 
-    # Combine and rank globally
-    merged = _rank(deduped_correctness + deduped_security + deduped_deterministic)
+    merged = _rank(deduped_findings)
+    
+    # Log provenance
+    merged_provenance = [f for f in merged if f.get("source") == "merged"]
+    logger.info("provenance of merged findings: %d merged natively", len(merged_provenance))
 
     duration_ms = round((time.monotonic() - start) * 1000)
     logger.info(
-        "MERGE_COMPLETE llm_findings=%d deterministic_findings=%d final_findings=%d latency_ms=%d",
-        len(deduped_correctness) + len(deduped_security), len(deduped_deterministic), len(merged), duration_ms,
+        "MERGE_COMPLETE final_findings=%d latency_ms=%d",
+        len(merged), duration_ms,
     )
 
     return {"raw_findings": merged}

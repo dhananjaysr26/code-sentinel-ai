@@ -58,6 +58,9 @@ For every finding you MUST provide ALL of these fields:
 If no credible security vulnerability exists in the diff, return {"findings": []}.
 Do NOT report findings you cannot directly support with code from the diff."""
 
+from langsmith import traceable
+
+@traceable(name="security_reviewer_node")
 async def security_review_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """Analyzes the diff and context to find security vulnerabilities."""
     start_time = time.monotonic()
