@@ -134,3 +134,12 @@ LOGGING = {
     },
 }
 AWS_BEARER_TOKEN_BEDROCK = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "")
+
+# ── Iterative Reviewer Loop Config ────────────────────────────────────────────
+ITERATIVE_MAX_ITERATIONS: int = int(os.environ.get("ITERATIVE_MAX_ITERATIONS", "5"))
+ITERATIVE_MAX_TOOL_CALLS: int = int(os.environ.get("ITERATIVE_MAX_TOOL_CALLS", "5"))
+ITERATIVE_MAX_TOTAL_TOOL_CALLS: int = int(os.environ.get("ITERATIVE_MAX_TOTAL_TOOL_CALLS", "10"))
+ITERATIVE_REVIEW_TIMEOUT_SECONDS: int = int(os.environ.get("ITERATIVE_REVIEW_TIMEOUT_SECONDS", "180"))
+ITERATIVE_MAX_TOOL_RESULT_CHARS: int = int(os.environ.get("ITERATIVE_MAX_TOOL_RESULT_CHARS", "12000"))
+ITERATIVE_MAX_REPEATED_TOOL_CALLS: int = int(os.environ.get("ITERATIVE_MAX_REPEATED_TOOL_CALLS", "1"))
+

@@ -67,6 +67,7 @@ class ReviewState(TypedDict):
     errors: Annotated[list[str], add]
     security_errors: Annotated[list[str], add]
     llm_usages: Annotated[list[dict], add]
+    timeline: Annotated[list[dict], add]
 
     # ── Written by BOTH parallel reviewers — needs merge-dict reducer ─────────
     reviewer_latencies: Annotated[dict, _merge_dicts]

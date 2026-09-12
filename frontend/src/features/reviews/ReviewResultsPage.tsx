@@ -241,6 +241,14 @@ export function ReviewResultsPage() {
                   <span className="font-mono font-medium text-slate-900">{review.usage.llm_calls}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span>Iterations</span>
+                  <span className="font-mono font-medium text-slate-900">{review.usage.iterations}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>MCP Tool Calls</span>
+                  <span className="font-mono font-medium text-slate-900">{review.usage.tool_calls}</span>
+                </div>
+                <div className="flex justify-between">
                   <span>Total Tokens</span>
                   <span className="font-mono font-medium text-slate-900">{review.usage.total_tokens.toLocaleString()}</span>
                 </div>

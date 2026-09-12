@@ -1,0 +1,11 @@
+[
+  {
+    "id": "defect-auth-bypass-1",
+    "category": "correctness",
+    "subcategory": "logic_error",
+    "file": "src/auth.py",
+    "expected_line": 8,
+    "description": "Logic error: passing a dict to has_required_role causes it to check keys instead of active roles, always granting access.",
+    "severity": "CRITICAL"
+  }
+]

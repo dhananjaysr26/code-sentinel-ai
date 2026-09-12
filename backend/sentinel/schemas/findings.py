@@ -75,6 +75,14 @@ class Finding(BaseModel):
         description="If merged, contains origins e.g. ['llm', 'linter']",
     )
 
+    @field_validator("severity", mode="before")
+    @classmethod
+    def normalize_severity(cls, v: str) -> str:
+        """Ensure severity is uppercase to match Enum."""
+        if isinstance(v, str):
+            return v.upper()
+        return v
+
     @field_validator("confidence")
     @classmethod
     def round_confidence(cls, v: float) -> float:

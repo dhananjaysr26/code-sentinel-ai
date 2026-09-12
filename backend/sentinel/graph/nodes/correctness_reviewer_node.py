@@ -1,19 +1,32 @@
+"""
+Correctness Reviewer LangGraph node — iterative MCP-enabled version.
+
+Replaces the single invoke_structured() call with run_iterative_reviewer(),
+which supports an LLM → MCP tool → LLM loop bounded by hard limits.
+
+Runs in PARALLEL with security_review_node after build_context.
+"""
 import logging
 import time
+from pathlib import Path
 from typing import Any, Dict
 
 from django.conf import settings
-from langchain_core.messages import SystemMessage, HumanMessage
+from langsmith import traceable
 
-from sentinel.schemas.findings import ReviewFindings
-from sentinel.services.llm_service import invoke_structured
+from sentinel.mcp.client import StdioMCPClient
+from sentinel.graph.nodes.iterative_reviewer import run_iterative_reviewer
 
 logger = logging.getLogger(__name__)
-from langsmith import traceable
+
 
 @traceable(name="correctness_reviewer_node")
 async def correctness_review_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Analyzes the diff and context to find correctness bugs."""
+    """Analyzes the diff and context to find correctness bugs.
+
+    Uses the iterative MCP loop: the LLM may call read_file / find_references
+    to retrieve missing context before returning its final findings.
+    """
     start_time = time.monotonic()
     review_id = state.get("metadata", {}).get("review_id", "?")
     blocks = state.get("context_blocks", [])
@@ -24,114 +37,33 @@ async def correctness_review_node(state: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     if not blocks:
+        logger.info("correctness_review_node: no context blocks, skipping")
         return {"correctness_raw_findings": []}
 
     provider = state.get("llm_provider", settings.LLM_PROVIDER).lower()
+    server_script = str(Path(settings.MCP_SERVER_SCRIPT).resolve())
+    mcp_client = StdioMCPClient(server_script=server_script)
 
-    system_msg = SystemMessage(
-        content=(
-            "You are CodeSentinel AI, an expert automated code reviewer.\n\n"
-            "TASK: Carefully analyze each code diff hunk and its surrounding context below. "
-            "Identify ALL correctness bugs including:\n"
-            "- NoneType / null dereferences\n"
-            "- Off-by-one errors (e.g. wrong range boundary)\n"
-            "- Inverted boolean conditions\n"
-            "- Resource leaks (e.g. file handles not closed)\n"
-            "- Missing key checks (e.g. dict['key'] without .get())\n"
-            "- Logic errors and incorrect return values\n\n"
-            "RULES:\n"
-            "1. Only report genuine correctness bugs, NOT style issues.\n"
-            "2. Do NOT report security vulnerabilities — those are handled by a separate reviewer.\n"
-            "3. Be thorough — examine every changed line for potential runtime errors.\n"
-            "4. For EACH finding you MUST provide ALL of these fields:\n"
-            "   - file: the relative file path (e.g. 'src/user.py')\n"
-            "   - line: the exact line number of the bug\n"
-            "   - title: a short descriptive title\n"
-            "   - category: must be 'correctness'\n"
-            "   - severity: one of 'critical', 'high', 'medium', 'low'\n"
-            "   - confidence: a float between 0.0 and 1.0\n"
-            "   - explanation: a detailed explanation of WHY this is a bug\n"
-            "   - evidence: the exact code snippet containing the bug\n"
-            "   - suggested_fix: the corrected code\n"
-            "   - source: must be 'llm'\n\n"
-            "If there are truly no correctness bugs, return {\"findings\": []}."
-        )
+    result = await run_iterative_reviewer(
+        specialist="correctness",
+        state=state,
+        provider=provider,
+        repo_path=state["repo_path"],
+        mcp_client=mcp_client,
     )
 
-    human_content = "Please review the following code changes:\n\n"
-    for block in blocks:
-        human_content += f"File: {block.file_path}\n"
-        human_content += f"```python\n{block.surrounding_code}\n```\n"
-        human_content += f"Diff:\n```diff\n{block.hunk_diff}\n```\n\n"
+    latency_ms = int((time.monotonic() - start_time) * 1000)
+    findings = result.get("correctness_raw_findings", [])
+    loop_summary = result.get("reviewer_latencies", {}).get("correctness_loop", {})
 
-    human_msg = HumanMessage(content=human_content)
+    logger.info(
+        "REVIEWER_COMPLETE reviewer=correctness findings=%d latency_ms=%d "
+        "llm_calls=%d tool_calls=%d stop_reason=%s",
+        len(findings),
+        latency_ms,
+        loop_summary.get("llm_call_count", "?"),
+        loop_summary.get("tool_call_count", "?"),
+        loop_summary.get("stop_reason", "?"),
+    )
 
-    logger.info("🚀 CALLING LLM PROVIDER: %s (correctness)", provider.upper())
-
-    try:
-        result = await invoke_structured(provider, [system_msg, human_msg], ReviewFindings)
-        parsed_response = result.response
-        usage = result.usage
-        usage.reviewer = "correctness"
-
-        # Tag each finding with reviewer='correctness'
-        raw = []
-        for f in parsed_response.findings:
-            d = f.model_dump()
-            d["reviewer"] = "correctness"
-            raw.append(d)
-
-        logger.info(
-            "REVIEWER_COMPLETE reviewer=correctness findings=%d latency_ms=%d tokens=%d",
-            len(raw), usage.latency_ms, usage.total_tokens,
-        )
-
-        existing_usages = list(state.get("llm_usages", []))
-        existing_usages.append(usage.model_dump())
-        
-        # Keep old latencies dictionary to not break other assumptions just in case
-        existing_latencies = dict(state.get("reviewer_latencies", {}))
-        existing_latencies["correctness_ms"] = usage.latency_ms
-
-        return {
-            "correctness_raw_findings": raw,
-            "llm_usages": existing_usages,
-            "reviewer_latencies": existing_latencies,
-        }
-
-    except Exception as exc:
-        latency_ms = int((time.monotonic() - start_time) * 1000)
-        logger.error(
-            "❌ REVIEWER_FAILED reviewer=correctness error=%s latency_ms=%d",
-            exc, latency_ms,
-        )
-        error_msg = f"Correctness reviewer failed ({provider.upper()}): {str(exc)}"
-        errors = list(state.get("errors", []))
-        errors.append(error_msg)
-        
-        usage_data = {}
-        if len(exc.args) > 1 and hasattr(exc.args[1], "model_dump"):
-            usage = exc.args[1]
-            usage.reviewer = "correctness"
-            usage_data = usage.model_dump()
-        else:
-            usage_data = {
-                "reviewer": "correctness",
-                "provider": provider,
-                "model": "unknown",
-                "status": "failed",
-                "latency_ms": latency_ms
-            }
-
-        existing_usages = list(state.get("llm_usages", []))
-        existing_usages.append(usage_data)
-
-        existing_latencies = dict(state.get("reviewer_latencies", {}))
-        existing_latencies["correctness_ms"] = latency_ms
-
-        return {
-            "correctness_raw_findings": [],
-            "errors": errors,
-            "llm_usages": existing_usages,
-            "reviewer_latencies": existing_latencies,
-        }
+    return result

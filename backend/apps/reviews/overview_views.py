@@ -58,6 +58,7 @@ class OverviewView(APIView):
             avg_latency=Avg("total_latency_ms"),
             avg_cost=Avg("total_estimated_cost"),
             total_calls=Sum("llm_calls"),
+            total_tool_calls=Sum("tool_calls"),
         )
         
         avg_tokens = round(usage_stats["avg_tokens"]) if usage_stats["avg_tokens"] else 0
@@ -65,6 +66,7 @@ class OverviewView(APIView):
         avg_latency_s = round(avg_latency_ms / 1000.0, 1)
         avg_cost = round(usage_stats["avg_cost"], 4) if usage_stats["avg_cost"] else None
         total_calls = usage_stats["total_calls"] or 0
+        total_tool_calls = usage_stats["total_tool_calls"] or 0
 
         # Evaluation quality — computed from seeded findings feedback
         # But we must exclude linter from LLM precision/recall metrics.
@@ -102,6 +104,7 @@ class OverviewView(APIView):
                     "avg_latency_s": avg_latency_s,
                     "avg_cost": avg_cost,
                     "total_calls": total_calls,
+                    "total_tool_calls": total_tool_calls,
                 },
                 "evaluation": {
                     "precision": precision,

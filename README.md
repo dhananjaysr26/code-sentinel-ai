@@ -230,3 +230,22 @@ The MCP server exposes the following tools:
   "tool": "ruff"
 }
 ```
+
+
+    # Make sure to activate the virtual environment first
+    source backend/.venv/bin/activate
+
+    # Run the review tool
+    python review.py \
+      --repo /Users/dhananjaysingh/Uncoders/AI_APP/code-sentinel-ai/test-repo/multi-loop \
+      --base HEAD~1 \
+      --target HEAD \
+      --provider openai
+
+  If you want to quickly compare it with Bedrock, just change the provider flag:
+
+    python review.py \
+      --repo /Users/dhananjaysingh/Uncoders/AI_APP/code-sentinel-ai/test-repo/multi-loop \
+      --base HEAD~1 \
+      --target HEAD \
+      --provider bedrock

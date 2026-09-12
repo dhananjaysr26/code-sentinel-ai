@@ -37,8 +37,14 @@ API_BASE = os.environ.get("CODESENTINEL_API", "http://localhost:8000")
 DEFAULT_REPO = str(_PROJECT_ROOT.parent / "seed_repo")
 
 
-def load_ground_truth(fixtures_dir: Path) -> list[GroundTruth]:
-    data = json.loads((fixtures_dir / "defects.json").read_text())
+def load_ground_truth(fixtures_dir: Path, repo_path: str) -> list[GroundTruth]:
+    if "auth-bypass" in repo_path:
+        path = fixtures_dir / "auth-bypass" / "ground_truth.json"
+    elif "multi-loop" in repo_path:
+        path = fixtures_dir / "multi-loop" / "ground_truth.json"
+    else:
+        path = fixtures_dir / "seed_repo" / "ground_truth.json"
+    data = json.loads(path.read_text())
     return [GroundTruth(**item) for item in data]
 
 
@@ -46,10 +52,11 @@ def run_review(repo_path: str, base_ref: str, target_ref: str) -> dict:
     """Call the Django API and return the full response dict."""
     url = f"{API_BASE}/api/reviews/"
     payload = {
-        "repo_path": str(Path(repo_path).resolve()),
+        "repo_path": str(repo_path),
         "base_ref": base_ref,
         "target_ref": target_ref,
-        "llm_provider": "bedrock",
+        "llm_provider": os.environ.get("LLM_PROVIDER", "bedrock"),
+        "force_refresh": True,
     }
     print(f"POST {url}")
     print(f"  repo_path:  {payload['repo_path']}")
@@ -94,7 +101,7 @@ def main() -> None:
     args = parser.parse_args()
 
     fixtures_dir = _EVALS_DIR / "fixtures"
-    truths = load_ground_truth(fixtures_dir)
+    truths = load_ground_truth(fixtures_dir, args.repo_path)
     correctness_truths = [t for t in truths if t.category == "correctness"]
     security_truths = [t for t in truths if t.category == "security"]
     print(f"\nGround truth: {len(truths)} seeded defects "

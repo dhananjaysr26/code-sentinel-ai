@@ -123,6 +123,14 @@ class ReviewListCreateView(APIView):
             # not the sum of parallel reviewers.
             review_latency_ms = int(metadata.get("total_duration_seconds", 0) * 1000)
 
+            # Aggregate tool calls and iterations from specialist loops
+            total_tool_calls = 0
+            total_iterations = 0
+            for loop_data in metadata.get("reviewer_latencies", {}).values():
+                if isinstance(loop_data, dict):
+                    total_tool_calls += loop_data.get("tool_call_count", 0)
+                    total_iterations += loop_data.get("iteration_count", 0)
+
             ReviewUsage.objects.create(
                 review=review,
                 provider=llm_provider,
@@ -132,6 +140,8 @@ class ReviewListCreateView(APIView):
                 total_latency_ms=review_latency_ms,
                 total_estimated_cost=total_cost if any(u.get("estimated_cost") is not None for u in llm_usages) else None,
                 llm_calls=calls,
+                tool_calls=total_tool_calls,
+                iterations=total_iterations,
                 models_used=list(models_used),
             )
 

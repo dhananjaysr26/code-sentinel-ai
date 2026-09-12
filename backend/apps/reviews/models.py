@@ -84,6 +84,8 @@ class ReviewUsage(models.Model):
     total_latency_ms = models.IntegerField(default=0)
     total_estimated_cost = models.FloatField(null=True, blank=True)
     llm_calls = models.IntegerField(default=0)
+    tool_calls = models.IntegerField(default=0)
+    iterations = models.IntegerField(default=0)
     models_used = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

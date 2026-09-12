@@ -1,0 +1,11 @@
+[
+  {
+    "id": "defect-multi-loop-1",
+    "category": "security",
+    "subcategory": "authorization",
+    "file": "src/auth.py",
+    "expected_line": 4,
+    "description": "Privilege escalation: changing _GUARDED_ACTION from delete_account to user_settings lowers the minimum required role.",
+    "severity": "HIGH"
+  }
+]

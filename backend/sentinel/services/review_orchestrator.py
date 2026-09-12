@@ -66,6 +66,7 @@ class ReviewOrchestrator:
             "errors": [],
             "security_errors": [],
             "llm_usages": [],
+            "timeline": [],
             "reviewer_latencies": {},
             "metadata": {
                 "review_id": review_id,
@@ -80,6 +81,8 @@ class ReviewOrchestrator:
         metadata = dict(final_state.get("metadata", {}))
         metadata["total_duration_seconds"] = round(duration, 3)
         metadata["finding_count"] = len(final_state.get("findings", []))
+        metadata["reviewer_latencies"] = final_state.get("reviewer_latencies", {})
+        metadata["timeline"] = final_state.get("timeline", [])
 
         logger.info(
             "[%s] Review complete — %d findings in %.2fs",
