@@ -14,6 +14,7 @@ import logging
 from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from django.views import View
 
 import threading
 import json
@@ -151,6 +152,7 @@ class ReviewListCreateView(APIView):
         # 1. Validate request
         create_serializer = ReviewCreateSerializer(data=request.data)
         if not create_serializer.is_valid():
+            logger.warning("Bad Request Errors: %s", create_serializer.errors)
             return Response(
                 {"errors": create_serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -174,6 +176,7 @@ class ReviewListCreateView(APIView):
 
         if request.GET.get("stream") == "true":
             threading.Thread(target=_run_and_save_review, args=(review.id, repo_path, base_ref, target_ref, llm_provider)).start()
+            logger.warning("Bad Request Errors: %s", create_serializer.errors)
             return Response({"id": review.id, "status": "running"}, status=status.HTTP_202_ACCEPTED)
 
         # Synchronous execution
@@ -193,6 +196,7 @@ class ReviewDetailView(APIView):
         try:
             review = Review.objects.prefetch_related("findings").get(pk=pk)
         except Review.DoesNotExist:
+            logger.warning("Bad Request Errors: %s", create_serializer.errors)
             return Response(
                 {"error": "Review not found"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -211,6 +215,7 @@ class FindingFeedbackView(APIView):
     def post(self, request, review_pk, finding_pk):
         serializer = FeedbackSerializer(data=request.data)
         if not serializer.is_valid():
+            logger.warning("Bad Request Errors: %s", create_serializer.errors)
             return Response(
                 {"errors": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -221,6 +226,7 @@ class FindingFeedbackView(APIView):
                 pk=finding_pk, review_id=review_pk
             )
         except ReviewFinding.DoesNotExist:
+            logger.warning("Bad Request Errors: %s", create_serializer.errors)
             return Response(
                 {"error": "Finding not found"},
                 status=status.HTTP_404_NOT_FOUND,
@@ -235,7 +241,7 @@ class FindingFeedbackView(APIView):
 
         return Response(ReviewFindingSerializer(finding).data)
 
-class ReviewStreamView(APIView):
+class ReviewStreamView(View):
     """GET /api/reviews/{review_id}/events/ — Stream SSE events for a review."""
 
     def get(self, request, review_id):

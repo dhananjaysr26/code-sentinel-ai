@@ -440,6 +440,7 @@ async def run_iterative_reviewer(
                     d.setdefault("source", "llm")
                     final_findings.append(d)
                     
+            
             existing_latencies = dict(state.get("reviewer_latencies", {}))
             existing_latencies[f"{specialist}_ms"] = r_latency
             existing_latencies[f"{specialist}_loop"] = {
@@ -454,11 +455,34 @@ async def run_iterative_reviewer(
                 "finding_count": len(final_findings)
             }
             
+            event_dict = {
+                "node": specialist,
+                "event": "llm_call",
+                "details": "invoke_structured (fast_path)",
+                "latency_ms": r_latency,
+                "tokens": s_dict.get("total_tokens", 0)
+            }
+            
+            if review_id:
+                from datetime import datetime, timezone
+                try:
+                    from sentinel.services.events import publish_event
+                    sse_event = {
+                        "review_id": review_id,
+                        "reviewer": specialist,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        **event_dict
+                    }
+                    publish_event(review_id, sse_event)
+                except ImportError:
+                    pass
+            
             return {
                 f"{specialist}_raw_findings": final_findings,
                 "llm_usages": [s_dict],
                 "reviewer_latencies": existing_latencies,
-                "timeline": [{"node": specialist, "event": "llm_call", "details": "invoke_structured (fast_path)", "latency_ms": r_latency, "tokens": s_dict.get("total_tokens", 0)}],
+                "timeline": [event_dict],
+
                 "llm_latency_ms": r_latency,
                 "mcp_calls": 0,
                 "unique_mcp_calls": 0,

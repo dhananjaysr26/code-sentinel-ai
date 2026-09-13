@@ -45,45 +45,30 @@ export const reviewsApi = {
     });
     
     if (!res.ok) {
-        return handleResponse<Review>(res); // handles errors normally
+        return handleResponse<Review>(res);
     }
     
-    const data = await res.json();
-    const reviewId = data.id;
+    return res.json() as Promise<Review>; // Resolves immediately!
+  },
 
-    // Listen to SSE until EOF, then fetch the completed review
-    return new Promise((resolve, reject) => {
-        const evtSource = new EventSource(`${BASE_URL}/reviews/${reviewId}/events/`);
-        
-        evtSource.onmessage = (event) => {
-            try {
-                const eventData = JSON.parse(event.data);
-                
-                if (eventData.type === "EOF") {
-                    evtSource.close();
-                    // Review is done in backend, now fetch the full record
-                    reviewsApi.getReview(reviewId)
-                        .then(resolve)
-                        .catch(reject);
-                } else {
-                    // Dispatch event so UI components can optionally show live logs
-                    window.dispatchEvent(new CustomEvent("ReviewLiveEvent", { detail: eventData }));
-                    console.log(`[${eventData.reviewer}] ${eventData.event} -> ${eventData.details}`);
-                }
-            } catch (err) {
-                console.error("SSE parse error", err);
+  listenToReviewEvents: (reviewId: string, onEvent: (eventData: any) => void) => {
+    const evtSource = new EventSource(`${BASE_URL}/reviews/${reviewId}/events/`);
+    evtSource.onmessage = (event) => {
+        try {
+            const eventData = JSON.parse(event.data);
+            if (eventData.type === "EOF") {
+                evtSource.close();
+            } else {
+                onEvent(eventData);
             }
-        };
-
-        evtSource.onerror = (err) => {
-            console.error("EventSource failed:", err);
-            evtSource.close();
-            // Try fetching anyway in case it finished and connection just dropped
-            reviewsApi.getReview(reviewId)
-                .then(resolve)
-                .catch(reject);
-        };
-    });
+        } catch (err) {
+            console.error("SSE parse error", err);
+        }
+    };
+    evtSource.onerror = () => {
+        evtSource.close();
+    };
+    return () => evtSource.close();
   },
 
   /**

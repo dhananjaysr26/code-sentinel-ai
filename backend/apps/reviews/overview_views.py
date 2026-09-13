@@ -58,7 +58,7 @@ class OverviewView(APIView):
             avg_latency=Avg("total_latency_ms"),
             avg_cost=Avg("total_estimated_cost"),
             total_calls=Sum("llm_calls"),
-            total_tool_calls=Sum("tool_calls"),
+            total_tool_calls=Sum("mcp_calls"),
         )
         
         avg_tokens = round(usage_stats["avg_tokens"]) if usage_stats["avg_tokens"] else 0
