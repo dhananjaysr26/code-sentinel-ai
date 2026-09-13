@@ -162,3 +162,41 @@ This is the primary engineering motivation for parallel fan-out.
 4. Implement linter (deterministic checks) as a fourth source.
 5. Add confidence calibration analysis (compare confidence vs TP/FP rates).
 6. Use Accept/Dismiss feedback as training signal for fine-tuning.
+
+
+## Evaluation Summary
+
+### Large-Diff Efficiency Benchmark
+
+Repository: code-sentinel-ai
+Base: HEAD~1
+Target: 429d7737
+
+| Metric | Before | After | Change |
+|---|---:|---:|---:|
+| Total tokens | 296,409 | 65,453 | -77.9% |
+| Wall-clock latency | 262.5s | 42.0s | -84.0% |
+| LLM calls | 6 | 10 | +4 |
+| MCP calls | N/A | 8 | — |
+| Findings | 54 | 2 | -96.3% |
+| New linter findings | 52 | 0 | Pre-existing findings suppressed |
+
+### Golden Set
+
+- Repositories: 4
+- Distinct seeded defects: 12
+- Categories: 4+
+- Runs per repository: 3
+- Total review runs: 12
+- Seeded-defect recall: 100%
+- Clean-diff false-positive rate: 0%, if measured
+- Detection stability: 100%
+
+### Interpretation
+
+The context planner and review-unit partitioning reduced repeated context
+while preserving detection of the seeded defects in the current test set.
+
+The results do not imply universal 100% accuracy. The golden set is small,
+and additional defects, languages, repository structures, and adversarial
+changes may produce different results.

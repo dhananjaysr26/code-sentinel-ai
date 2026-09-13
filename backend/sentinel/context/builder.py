@@ -137,34 +137,8 @@ class ContextBuilder:
             if symbol_match:
                 symbol = symbol_match.group(1)
                 
-                # Fetch references using the new MCP tool
-                try:
-                    ref_output = await self.mcp_client.find_references(repo_path, symbol)
-                    ref_data = json.loads(ref_output)
-                    refs = ref_data.get("references", [])
-                    
-                    if refs:
-                        MAX_REFERENCES = 5  # Cap the number of retrieved references to prevent context blowout
-                        refs = refs[:MAX_REFERENCES]
-                        
-                        surrounding_code += f"\n\n--- Usage References for '{symbol}' (max {MAX_REFERENCES}) ---\n"
-                        for ref in refs:
-                            ref_file = ref.get('file')
-                            ref_line = ref.get('line')
-                            ref_kind = ref.get('kind')
-                            
-                            # Read a small bounded context around the reference
-                            ref_code = await self.mcp_client.read_file(
-                                repo_path=repo_path,
-                                file_path=ref_file,
-                                start_line=max(1, ref_line - 2),
-                                end_line=ref_line + 2,
-                            )
-                            surrounding_code += f"\nFile: {ref_file} | Line: {ref_line} | Kind: {ref_kind}\n"
-                            surrounding_code += f"{ref_code}\n"
-                except Exception as ref_exc:
-                    logger.warning("find_references failed or parsing failed for %s: %s", symbol, ref_exc)
-                    
+                # Removed find_references aggressive pre-fetching to save tokens.
+                # LLM can use find_references tool in ReAct loop if it decides it needs callers.
         except Exception as exc:
             logger.warning(
                 "MCP read_file failed for %s (L%d-L%d): %s. Using hunk-only context.",
