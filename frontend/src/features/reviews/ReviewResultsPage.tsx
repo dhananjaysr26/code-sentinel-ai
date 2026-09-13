@@ -98,6 +98,7 @@ export function ReviewResultsPage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<Severity | "ALL">("ALL");
+  const [hideLinter, setHideLinter] = useState<boolean>(false);
 
   const { data: review, isLoading, error, refetch } = useQuery({
     queryKey: ["review", id],
@@ -151,10 +152,11 @@ export function ReviewResultsPage() {
     {} as Record<Severity, number>
   );
 
-  const filtered: Finding[] =
-    activeFilter === "ALL"
-      ? review.findings
-      : review.findings.filter((f) => f.severity === activeFilter);
+  const filtered: Finding[] = review.findings.filter((f) => {
+    if (hideLinter && f.source === "linter") return false;
+    if (activeFilter !== "ALL" && f.severity !== activeFilter) return false;
+    return true;
+  });
 
   const StatusIcon  = review.status === "completed" ? CheckCircle2 : review.status === "failed" ? XCircle : Clock;
   const statusBg    = review.status === "completed" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : review.status === "failed" ? "bg-red-50 border-red-200 text-red-700" : "bg-blue-50 border-blue-200 text-blue-700";
@@ -239,6 +241,25 @@ export function ReviewResultsPage() {
                 </li>
               ))}
             </ul>
+            
+            <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
+              <label htmlFor="hide-linter" className="text-xs font-semibold text-slate-600 cursor-pointer">
+                Hide linter warnings
+              </label>
+              <button
+                id="hide-linter"
+                role="switch"
+                aria-checked={hideLinter}
+                onClick={() => setHideLinter(!hideLinter)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#6d5dfb] focus:ring-offset-2 ${hideLinter ? 'bg-[#6d5dfb]' : 'bg-slate-200'}`}
+              >
+                <span className="sr-only">Hide linter warnings</span>
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${hideLinter ? 'translate-x-2' : '-translate-x-2'}`}
+                />
+              </button>
+            </div>
           </div>
 
           {/* Review Metrics */}

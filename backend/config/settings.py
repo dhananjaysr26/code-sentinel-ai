@@ -97,10 +97,17 @@ BEDROCK_MODEL_ROUTING = os.environ.get("BEDROCK_MODEL_ROUTING", "apac.anthropic.
 # Absolute path to the MCP server script.
 # Default: resolve relative to this settings file → project root → mcp_server/server.py
 _PROJECT_ROOT = BASE_DIR.parent
-MCP_SERVER_SCRIPT: str = os.environ.get(
-    "MCP_SERVER_SCRIPT",
-    str(_PROJECT_ROOT / "mcp_server" / "server.py"),
-)
+
+_mcp_env = os.environ.get("MCP_SERVER_SCRIPT")
+if _mcp_env:
+    # If the path in .env is relative (like "../mcp_server/server.py"), resolve it relative to backend
+    if not os.path.isabs(_mcp_env):
+        MCP_SERVER_SCRIPT = str((BASE_DIR / _mcp_env).resolve())
+    else:
+        MCP_SERVER_SCRIPT = _mcp_env
+else:
+    MCP_SERVER_SCRIPT = str(_PROJECT_ROOT / "mcp_server" / "server.py")
+
 
 # ── Review / Context Config ──────────────────────────────────────────────────
 CONTEXT_WINDOW_LINES: int = int(os.environ.get("CONTEXT_WINDOW_LINES", "20"))

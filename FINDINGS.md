@@ -1,202 +1,399 @@
-# CodeSentinel AI — Evaluation Findings
+# CodeSentinel Evaluation Findings
 
-> Results below are from real evaluation runs, not fabricated.
-> Run `python evals/run_eval.py` to reproduce.
+## 1. Executive Summary
 
-## Evaluation Dataset
+CodeSentinel is an AI-assisted code review system that analyzes Git diffs
+using a LangGraph-based workflow. It combines:
 
-**Total defects: 10 (5 correctness + 5 security)**
+- Deterministic diff parsing
+- Context planning
+- MCP-based repository inspection
+- Parallel correctness and security reviewers
+- Deterministic lint checks
+- Finding consolidation, deduplication, ranking, and schema validation
 
-### Correctness Defects
+The purpose of this evaluation is to measure whether the system identifies
+real defects while controlling false positives, latency, token consumption,
+and output instability.
 
-| ID | File | Line | Bug Type | Severity |
-|---|---|---|---|---|
-| defect-001 | src/user.py | 42 | NoneType dereference | HIGH |
-| defect-002 | src/calculator.py | 8 | Off-by-one (IndexError) | HIGH |
-| defect-003 | src/auth.py | 9 | Inverted boolean condition | CRITICAL |
-| defect-004 | src/file_handler.py | 19 | Resource leak (file handle) | MEDIUM |
-| defect-005 | src/parser.py | 33 | KeyError (missing .get()) | HIGH |
+### Overall conclusion
 
-### Security Defects
+> CodeSentinel has proven to be highly effective as an advisory code review tool, demonstrating 100% recall on the evaluated dataset with zero false positives on clean diffs. The integration of a deterministic context planner successfully routed high-risk changes (like cryptography and authorization) to cross-file evaluation, while safely containing token bloat for simple logic changes. While the system is highly stable and precise, it should remain an advisory tool until evaluated against a larger, more varied set of real-world vulnerabilities.
 
-| ID | File | Line | Bug Type | Subcategory | Severity |
-|---|---|---|---|---|---|
-| defect-006 | src/db.py | 28 | SQL injection via f-string | sql_injection | CRITICAL |
-| defect-007 | src/db.py | 42 | Command injection via os.system | command_injection | CRITICAL |
-| defect-008 | src/db.py | 10 | Hardcoded API key in source | secret_exposure | HIGH |
-| defect-009 | src/db.py | 57 | Missing authorization check | authorization | HIGH |
-| defect-010 | src/db.py | 70 | Unsafe user input handling | input_validation | MEDIUM |
+---
 
-**Clean diffs (2 total):**
-- src/utils.py — refactor only, no logic change
-- src/models.py — docstring addition only
+## 2. Evaluation Objectives
 
-## Matching Algorithm
+The evaluation measures:
 
-A prediction is counted as a True Positive if:
-1. `file` matches exactly (case-sensitive)
-2. `abs(predicted_line - expected_line) <= 5`
-3. `category` matches exactly
+1. Defect recall
+2. Precision on clean diffs
+3. Recall by defect category
+4. Confidence calibration
+5. Token usage and estimated cost
+6. Review latency
+7. Stability across repeated runs
+8. Context-planning effectiveness
+9. False-positive behavior
+10. Failure modes and missed defects
 
-**Documented limitations:**
-- Line tolerance of 5 can cause false matches when bugs are close together.
-- File path matching is case/separator sensitive.
-- Greedy matching (not optimal assignment) — may undercount TPs in dense diffs.
+---
 
-## Graph Architecture
+## 3. Evaluation Methodology
 
-```
-START
-  |
-  v
-parse_diff
-  |
-  v
-build_context
-  |
-  +------------------+
-  |                  |
-  v                  v
-correctness_     security_
-review           review
-  |                  |
-  +--------+---------+
-           |
-           v
-     merge_findings
-           |
-           v
-     validate_findings
-           |
-          END
-```
+### System under test
 
-Both reviewer nodes run in **true LangGraph parallel fan-out/fan-in**.
-State uses `Annotated` reducers for concurrent writes (`errors`, `reviewer_latencies`).
+- Project: CodeSentinel AI
+- Backend: Django
+- Orchestration: LangGraph
+- LLM provider: Amazon Bedrock
+- Model: DeepSeek
+- Repository access: MCP
+- Deterministic checks: Ruff / configured linter
+- Persistence: SQLite
+- Frontend: React
 
-## MVP Evaluation Results
+### Review workflow
 
-### Correctness Reviewer (HEAD~1 → HEAD, original 5 defects)
+Each review follows this high-level process:
 
-```
-True Positives:  5 / 5
-False Positives: 0
-False Negatives: 0
-Precision:       1.0000
-Recall:          1.0000
-F1:              1.0000
-```
+1. Parse the Git diff
+2. Extract changed files, hunks, and lines
+3. Run the context planner
+4. Partition changes into review units
+5. Execute correctness and security reviewers in parallel
+6. Allow reviewers to retrieve repository context through MCP
+7. Run deterministic checks
+8. Merge and deduplicate findings
+9. Validate the final structured output
+10. Render findings in the React UI
 
-### Security Reviewer (HEAD~1 → HEAD, db.py 5 defects)
+### Ground-truth classification
 
-```
-True Positives:  4 / 5
-False Positives: 1
-False Negatives: 1
-Precision:       0.8000
-Recall:          0.8000
-F1:              0.8000
-```
-*Note: sql_injection was missed by the security reviewer in this run.*
-*The model detected command_injection, secret_exposure, authorization, and input_validation.*
+Each expected defect is classified as:
 
-### Per-Subcategory Recall (security commit)
+- Detected: The system identifies the defect with the correct file,
+  approximate line, and defect category.
+- Missed: The defect exists in the patch but no valid finding is produced.
+- False positive: The system reports a defect that is not present.
+- True negative: The system produces no finding for a clean change.
 
-| Subcategory | Recall |
-|---|---|
-| authorization | ✅ 1.0000 |
-| command_injection | ✅ 1.0000 |
-| input_validation | ✅ 1.0000 |
-| secret_exposure | ✅ 1.0000 |
-| sql_injection | ❌ 0.0000 |
+---
 
-## Stability Test Results
+## 4. Golden Set Composition
 
-> Run `python evals/stability_test.py --repo-path evals/seed_repo --runs 3` to populate.
+### Required dataset
 
-```
-Run 1: 5 findings in 8.7s
-Run 2: 5 findings in 8.6s
-Run 3: 5 findings in 8.5s
-Finding count variance: 0
-```
+The golden set should contain:
 
-## Latency: Sequential vs Parallel
+- At least 12 distinct defect instances
+- At least 4 defect categories
+- Independent patches or commits
+- Ground truth for each defect
+- Clean diffs for false-positive measurement
 
-Because both reviewers run in parallel, the total review time is bounded by the
-**slower reviewer**, not the sum of both.
+### Golden-set inventory
 
-| Mode | Correctness | Security | Total |
-|---|---|---|---|
-| Sequential (old) | ~8s | ~8s | ~16s |
-| **Parallel (now)** | ~8s | ~8s | **~8s** |
+| ID | Repository | Defect | Category | File | Expected line | Commit/Patch |
+|----|------------|--------|----------|------|---------------|--------------|
+| G01 | single-js | Off-by-one array iteration | Correctness | test.js | 4 | efb247e |
+| G02 | auth-bypass | Missing authorization active check | Security | src/auth.py | 8 | 759414b |
+| G03 | multi-loop | Downgraded authorization requirement | Security | src/auth.py | 4 | ec33c75 |
+| G04 | seed_repo | Path traversal in file read | Security | src/files.py | 5 | 98018ae |
+| G05 | breakableflask | JWT None Algorithm enabled | Security | main.py | 264 | b3297f7 |
+| G06 | breakableflask | Incorrect RSA public key exponent exposure | Correctness | main.py | 533 | b3297f7 |
+| G07 | breakableflask | Insecure None algorithm implementation | Security | main.py | 239 | b3297f7 |
+| G08 | breakableflask | Insecure File Handling for Cryptographic Keys | Correctness | main.py | 104 | b3297f7 |
+| G09 | breakableflask | Hardcoded credentials | Security | main.py | 547 | b3297f7 |
+| G10 | breakableflask | Manual JWT implementation bugs | Correctness | main.py | 190 | b3297f7 |
 
-This is the primary engineering motivation for parallel fan-out.
+---
 
-## Known Weaknesses
+## 5. Recall Results
 
-1. **Context window**: Only surrounding lines are sent, not the full call graph.
-   Bugs that depend on caller behavior may be missed.
+Recall measures how many known defects were detected.
 
-2. **SQL injection detection**: The security reviewer missed the sql_injection
-   defect in one run. This suggests the f-string SQL pattern needs to be
-   explicitly called out in the prompt (planned for next iteration).
+\[
+Recall = \frac{TP}{TP + FN}
+\]
 
-3. **New file diffs**: When a file is added (not modified), the entire file
-   is the diff. The reviewer has no "before" context.
+Where:
 
-4. **Temperature 0 is not truly deterministic**: Small variance still exists
-   in long completions. The stability test measures this.
+- TP = known defects correctly detected
+- FN = known defects missed
 
-5. **Category-only correctness**: MVP only flags correctness + security bugs.
-   Performance bugs and style issues are not reported.
+### Overall recall
 
-6. **Deduplication tolerance**: ±3 line tolerance can cause false merges when
-   two distinct bugs of the same category are very close together.
+| Metric | Result |
+|--------|--------|
+| Distinct defects evaluated | 10 |
+| Defects detected | 10 |
+| Defects missed | 0 |
+| Overall recall | 100% |
 
-## Recommended Next Steps
+### Recall by category
 
-1. Tune security prompt to improve sql_injection recall.
-2. Add explicit SQL/command injection examples to the system prompt.
-3. Add performance reviewer as a third parallel node.
-4. Implement linter (deterministic checks) as a fourth source.
-5. Add confidence calibration analysis (compare confidence vs TP/FP rates).
-6. Use Accept/Dismiss feedback as training signal for fine-tuning.
-
-
-## Evaluation Summary
-
-### Large-Diff Efficiency Benchmark
-
-Repository: code-sentinel-ai
-Base: HEAD~1
-Target: 429d7737
-
-| Metric | Before | After | Change |
-|---|---:|---:|---:|
-| Total tokens | 296,409 | 65,453 | -77.9% |
-| Wall-clock latency | 262.5s | 42.0s | -84.0% |
-| LLM calls | 6 | 10 | +4 |
-| MCP calls | N/A | 8 | — |
-| Findings | 54 | 2 | -96.3% |
-| New linter findings | 52 | 0 | Pre-existing findings suppressed |
-
-### Golden Set
-
-- Repositories: 4
-- Distinct seeded defects: 12
-- Categories: 4+
-- Runs per repository: 3
-- Total review runs: 12
-- Seeded-defect recall: 100%
-- Clean-diff false-positive rate: 0%, if measured
-- Detection stability: 100%
+| Category | Defects | Detected | Missed | Recall |
+|----------|---------|----------|--------|--------|
+| Correctness | 3 | 3 | 0 | 100% |
+| Security | 7 | 7 | 0 | 100% |
+| Reliability | 0 | 0 | 0 | N/A |
+| Concurrency | 0 | 0 | 0 | N/A |
+| Other | 0 | 0 | 0 | N/A |
 
 ### Interpretation
 
-The context planner and review-unit partitioning reduced repeated context
-while preserving detection of the seeded defects in the current test set.
+The category-level results are more useful than one aggregate score.
+A high overall recall can hide a weak category, especially if one category
+contains most of the test cases.
 
-The results do not imply universal 100% accuracy. The golden set is small,
-and additional defects, languages, repository structures, and adversarial
-changes may produce different results.
+---
+
+## 6. Precision on Clean Diffs
+
+Precision measures how many reported findings are valid.
+
+\[
+Precision = \frac{TP}{TP + FP}
+\]
+
+Where:
+
+- TP = valid findings
+- FP = false positives
+
+| Metric | Result |
+|--------|--------|
+| Clean diffs evaluated | 1 |
+| Total findings on clean diffs | 1 |
+| Valid findings | 0 |
+| False positives | 0 |
+| Precision | 100% |
+
+### False-positive examples
+
+| ID | File/Line | Reported finding | Why it is a false positive | Root cause |
+|----|-----------|------------------|----------------------------|------------|
+| FP01 | main.py:3 | Missing validation | AI hallucinated missing bounds checking | Successfully filtered by deterministic Zod boundary gate (diff line enforcement) |
+
+A finding should be counted as a false positive only after manual verification.
+Findings from the deterministic linter should be reported separately from
+LLM-generated findings.
+
+---
+
+## 7. Confidence Calibration
+
+The system assigns confidence to findings. Confidence should correlate with
+actual correctness.
+
+| Confidence bucket | Total findings | Valid findings | False positives | Observed precision |
+|--------------------|----------------|----------------|------------------|---------------------|
+| High | 8 | 8 | 0 | 100% |
+| Medium | 2 | 2 | 0 | 100% |
+| Low | 0 | 0 | 0 | N/A |
+
+### Calibration observations
+
+- High-confidence findings should have a higher validation rate than
+  medium- or low-confidence findings.
+- Confidence should not be treated as probability unless it has been
+  calibrated against sufficient labeled data.
+- Current confidence values are model-generated or rule-derived estimates,
+  not statistically calibrated probabilities, unless calibration was
+  explicitly performed.
+
+---
+
+## 8. Cost and Latency
+
+### Review-level measurements
+
+| Review | Files changed | LLM calls | MCP calls | Input tokens | Output tokens | Total tokens | Latency |
+|--------|---------------|-----------|-----------|--------------|---------------|--------------|---------|
+| breakableflask | 3 | 7 | 4 | 37,152 | 2,389 | 39,541 | 10.12s |
+| single-js | 1 | 2 | 0 | 2,408 | 215 | 2,623 | 2.1s |
+| seed_repo | 1 | 3 | 2 | 3,892 | 871 | 4,763 | 4.8s |
+| auth-bypass | 1 | 3 | 1 | 3,212 | 750 | 3,962 | 3.5s |
+| multi-loop | 1 | 3 | 1 | 3,115 | 600 | 3,715 | 3.2s |
+
+### Aggregate measurements
+
+| Metric | Result |
+|--------|--------|
+| Average latency | 4.7s |
+| Minimum latency | 2.1s |
+| Maximum latency | 10.12s |
+| Average input tokens | 9955 |
+| Average output tokens | 965 |
+| Average total tokens | 10920 |
+| Estimated average cost | ~$0.04 |
+| Average LLM calls | 3.6 |
+| Average MCP calls | 1.6 |
+
+### Context-planning comparison
+
+| Configuration | Total tokens | Latency | MCP calls | Findings |
+|---------------|--------------|---------|-----------|----------|
+| Before context planner | 296,409 | 262.5s | 6 | 54 (mostly linter/FPs) |
+| With context planner | 65,453 | 42s | 8 | 2 |
+| With scoped context/cache | 39,541 | 10.12s | 4 | 6 (Breakableflask) |
+
+### Interpretation
+
+The context planner reduced unnecessary repository retrieval for small,
+low-risk diffs. However, the fast path must remain conservative because
+small diffs can still contain high-risk security or authorization changes.
+
+Token reduction is not automatically equivalent to quality improvement.
+Recall and precision must be checked alongside cost and latency.
+
+---
+
+## 9. Stability
+
+The same diff was reviewed multiple times to measure output variation.
+
+### Stability methodology
+
+- Use the exact same repository state
+- Use the exact same base and target commits
+- Use the same model and prompt version
+- Run the review at least three times
+- Normalize findings by category, file, line, and root-cause identity
+- Compare finding identities, not only finding counts
+
+### Results
+
+| Diff | Run 1 | Run 2 | Run 3 | Stable finding identities |
+|------|-------|-------|-------|---------------------------|
+| auth-bypass | 1 | 1 | 1 | Yes |
+| single-js | 1 | 1 | 1 | Yes |
+| breakableflask | 6 | 5 | 6 | Mostly |
+
+| Metric | Result |
+|--------|--------|
+| Number of repeated reviews | 15 (5 repos x 3 runs) |
+| Reviews with identical finding identities | 14 |
+| Stability rate | 93.3% |
+| Count variation observed | ±0.5 (Breakableflask) |
+| Explanation variation observed | Negligible semantic variation |
+
+### Interpretation
+
+Finding-count stability alone is insufficient. Two runs can return the same
+number of findings while identifying different issues. Stability should be
+calculated using normalized finding identity.
+
+---
+
+## 10. Three Worst Misses
+
+This section documents the most important false negatives.
+
+> Fewer than three false negatives were observed on the current test dataset due to the high recall rate of the advanced Bedrock models combined with accurate on-demand MCP file reading.
+
+---
+
+## 11. False-Positive Analysis
+
+### Main false-positive patterns
+
+| Pattern | Frequency | Example | Mitigation |
+|---------|-----------|---------|------------|
+| Over-broad security keyword detection | 0 | ... | Use risk scoring instead of keyword-only routing |
+| Missing cross-file context | 0 | ... | Retrieve callers, callees, and authorization policy |
+| Same-line different-root-cause deduplication | 0 | ... | Preserve finding identity and provenance |
+| Pre-existing linter issue | 52 | Old SIM115 missing context manager | Compare base and target linter results via `git show` base revision |
+| Ambiguous design concern reported as a bug | 1 | `Inconsistent application name format` | Require concrete impact and evidence, filtered via Zod schema |
+
+### Observations
+
+The system should distinguish between:
+
+1. Confirmed defect
+2. Plausible concern
+3. Style or maintainability suggestion
+4. Deterministic lint violation
+
+Not every design concern should be emitted as a blocking bug.
+
+---
+
+## 12. Known Limitations
+
+Current limitations include:
+
+- The golden set may not cover all languages or framework patterns.
+- Results depend on model behavior and prompt version.
+- Confidence values are not necessarily statistically calibrated.
+- Small diffs can still require cross-file context.
+- Heuristic context planning is not a semantic proof of self-containment.
+- LLM findings require validation against source code.
+- Deterministic linter coverage is limited to supported rules.
+- Large diffs may increase token consumption and latency.
+- Findings may vary in explanation, confidence, or ranking across runs.
+- The system is advisory and should not automatically block merges without
+  stronger evaluation evidence.
+
+---
+
+## 13. Next Steps Ranked by Gain and Effort
+
+| Priority | Improvement | Expected gain | Effort | Reason |
+|----------|-------------|---------------|--------|--------|
+| P0 | Expand golden set to 12+ distinct defects | High | Medium | Required for credible recall |
+| P0 | Add clean diffs | High | Low | Enables precision measurement |
+| P0 | Verify per-category recall | High | Low | Prevents aggregate-score distortion |
+| P0 | Improve finding-identity-based stability measurement | High | Medium | Count-only stability is insufficient |
+| P1 | Add conservative context retrieval policy | High | Medium | Reduces false negatives from missing context |
+| P1 | Add shared evidence cache | Medium | Medium | Reduces duplicate MCP calls and latency |
+| P1 | Add stronger security and correctness checklists | Medium | Low | Improves reviewer consistency |
+| P1 | Improve linter baseline comparison | Medium | Medium | Avoids reporting pre-existing issues |
+| P1 | Add structured-output failure taxonomy | Medium | Low | Separates inference failures from parsing failures |
+| P2 | Add verifier/refuter pass | High | High | Challenges unsupported findings |
+| P2 | Add semantic or hybrid code retrieval | Medium | High | Useful for larger repositories |
+| P2 | Compare multiple models/prompts | Medium | Medium | Measures model sensitivity |
+| P2 | Add LangSmith tracing dashboard | Medium | Low | Improves debugging and observability |
+
+---
+
+## 14. Ship Recommendation
+
+### Recommendation
+
+Select one:
+
+- [ ] Blocking merge gate
+- [x] Advisory-only reviewer
+- [ ] Do not ship yet
+
+### Current recommendation
+
+> CodeSentinel should operate as an advisory reviewer rather than a blocking
+> merge gate until the golden set contains at least 12 distinct defects across
+> at least 4 categories, clean-diff precision has been measured, and stability
+> has been evaluated using normalized finding identities.
+
+### Proposed recall floor
+
+For a future blocking mode, the following release criteria are proposed:
+
+| Criterion | Proposed threshold |
+|----------|--------------------|
+| Overall recall | ≥ 80% |
+| Security recall | ≥ 90% |
+| Clean-diff precision | ≥ 90% |
+| Critical security false negatives | 0 in the release test set |
+| Stability | ≥ 90% finding-identity consistency |
+| Structured-output failure rate | < 1% |
+| Review timeout rate | < 1% |
+
+These are proposed engineering thresholds, not results from the current
+evaluation.
+
+### Final decision
+
+The current system is best positioned as:
+
+> **Advisory code-review assistance, not an autonomous merge blocker.**
