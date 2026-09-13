@@ -249,3 +249,5 @@ The MCP server exposes the following tools:
       --base HEAD~1 \
       --target HEAD \
       --provider bedrock
+### Advanced Context Engineering
+CodeSentinel AI leverages a 3-Layer Selective Context architecture to minimize input token explosion during deep multi-hop reasoning. Instead of blindly sending full file transcripts on every loop, the agent normalizes retrieved files into an `evidence_store` and injects a heavily compressed Context Manifest into the prompt. This keeps context windows small, latency low, and drastically reduces token costs while maintaining high recall.

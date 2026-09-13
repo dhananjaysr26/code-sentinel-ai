@@ -38,49 +38,72 @@ def _normalize_path(path: str) -> str:
     return path
 
 
-def _dedup_within_category(findings: list[dict]) -> tuple[list[dict], int]:
-    """Deduplicate findings within the same category using file+line proximity.
+import re
 
-    Greedy: iterate in order, skip any finding that is within ±LINE_DEDUP_TOLERANCE
-    lines of an already-kept finding in the same file+category.
-    Keeps the higher-confidence finding when two are equivalent,
-    and merges provenance (source/evidence_sources).
-    """
+def _is_semantic_duplicate(f1: dict, f2: dict) -> bool:
+    """Check if two findings on the same line are semantically identical."""
+    # Must be same file and close lines
+    if _normalize_path(f1.get("file", "")) != _normalize_path(f2.get("file", "")):
+        return False
+    
+    l1 = f1.get("line") or 0
+    l2 = f2.get("line") or 0
+    if abs(l1 - l2) > _LINE_DEDUP_TOLERANCE:
+        return False
+        
+    # Same category is a strong signal
+    if f1.get("category") == f2.get("category"):
+        return True
+        
+    # If different categories (e.g. Correctness vs Security), check text similarity
+    def get_tokens(f):
+        text = str(f.get("title", "")) + " " + str(f.get("explanation", ""))
+        return set(re.findall(r'\b\w+\b', text.lower()))
+        
+    t1 = get_tokens(f1)
+    t2 = get_tokens(f2)
+    
+    if not t1 or not t2:
+        return False
+        
+    intersection = len(t1.intersection(t2))
+    union = len(t1.union(t2))
+    jaccard = intersection / union if union > 0 else 0
+    
+    return jaccard > 0.20  # 20% word overlap is enough if they are on the exact same line
+
+def _dedup_findings(findings: list[dict]) -> tuple[list[dict], int]:
+    """Deduplicate findings, merging cross-category duplicates into a combined provenance."""
     kept: list[dict] = []
     removed_count = 0
     
     for candidate in findings:
-        c_file = _normalize_path(candidate.get("file", ""))
-        c_line = candidate.get("line") or 0
-        c_category = candidate.get("category", "")
-
         duplicate = False
         for i, existing in enumerate(kept):
-            e_file = _normalize_path(existing.get("file", ""))
-            e_line = existing.get("line") or 0
-            e_category = existing.get("category", "")
-
-            if (
-                c_file == e_file
-                and c_category == e_category
-                and abs(c_line - e_line) <= _LINE_DEDUP_TOLERANCE
-            ):
-                # Duplicate found — keep the higher-confidence one, but merge provenance
-                c_source = candidate.get("source", "llm")
-                e_source = existing.get("source", "llm")
+            if _is_semantic_duplicate(candidate, existing):
+                # Merge provenance
+                c_reviewer = candidate.get("reviewer") or "unknown"
+                e_reviewer = existing.get("reviewer") or "unknown"
+                c_category = candidate.get("category")
+                e_category = existing.get("category")
                 
-                c_sources = candidate.get("evidence_sources", [c_source] if c_source != "merged" else [])
-                e_sources = existing.get("evidence_sources", [e_source] if e_source != "merged" else [])
+                # We append to lists to preserve the history
+                exist_reviewers = existing.get("supporting_reviewers", [e_reviewer])
+                if c_reviewer not in exist_reviewers:
+                    exist_reviewers.append(c_reviewer)
+                    
+                exist_sources = existing.get("sources", [e_category])
+                if c_category not in exist_sources:
+                    exist_sources.append(c_category)
                 
-                merged_sources = list(set(c_sources + e_sources))
-                
+                # Keep the higher confidence one's core text, but update lists
                 if candidate.get("confidence", 0) > existing.get("confidence", 0):
-                    candidate["source"] = "merged" if len(merged_sources) > 1 else c_source
-                    candidate["evidence_sources"] = merged_sources
+                    candidate["supporting_reviewers"] = exist_reviewers
+                    candidate["sources"] = exist_sources
                     kept[i] = candidate
                 else:
-                    existing["source"] = "merged" if len(merged_sources) > 1 else e_source
-                    existing["evidence_sources"] = merged_sources
+                    existing["supporting_reviewers"] = exist_reviewers
+                    existing["sources"] = exist_sources
                     kept[i] = existing
                     
                 duplicate = True
@@ -88,6 +111,8 @@ def _dedup_within_category(findings: list[dict]) -> tuple[list[dict], int]:
                 break
 
         if not duplicate:
+            candidate.setdefault("supporting_reviewers", [candidate.get("reviewer", "unknown")])
+            candidate.setdefault("sources", [candidate.get("category", "unknown")])
             kept.append(candidate)
 
     return kept, removed_count
@@ -135,7 +160,7 @@ async def merge_findings_node(state: Dict[str, Any]) -> Dict[str, Any]:
     
     all_findings = correctness + security + deterministic
     
-    deduped_findings, removed = _dedup_within_category(all_findings)
+    deduped_findings, removed = _dedup_findings(all_findings)
     
     logger.info("dedupe output count: %d", len(deduped_findings))
     logger.info("findings removed because of deduplication: %d", removed)

@@ -7,6 +7,7 @@ urlpatterns = [
     # Reviews CRUD
     path("", views.ReviewListCreateView.as_view(), name="review-list-create"),
     path("<uuid:pk>/", views.ReviewDetailView.as_view(), name="review-detail"),
+    path("<uuid:review_id>/events/", views.ReviewStreamView.as_view(), name="review-events"),
     path(
         "<uuid:review_pk>/findings/<uuid:finding_pk>/feedback/",
         views.FindingFeedbackView.as_view(),

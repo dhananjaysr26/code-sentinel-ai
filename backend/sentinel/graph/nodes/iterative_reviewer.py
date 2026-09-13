@@ -33,9 +33,23 @@ from uuid import uuid4
 
 from django.conf import settings
 from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10), reraise=True)
+async def safe_ainvoke(llm, messages):
+    return await llm.ainvoke(messages)
 
 from sentinel.schemas.findings import ReviewFindings
 from sentinel.services.llm_service import invoke_structured, get_llm, _normalize_usage
+from sentinel.graph.context_engineering import (
+    compute_token_breakdown,
+    normalize_evidence,
+    generate_context_manifest,
+    relevance_aware_compaction,
+    generate_evidence_cache_key,
+    EvidenceItem
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +61,15 @@ MCP_TOOL_DEFINITIONS = [
         "function": {
             "name": "read_file",
             "description": (
-                "Read a file from the repository to understand code context, "
-                "type definitions, policy mappings, or configuration values. "
-                "Use this when a changed constant, identifier, or function call "
-                "refers to something defined in a file not already in the context."
+                "Read a specific file and optional line range from the target repository.\n"
+                "Use this when:\n"
+                "- A changed function depends on a definition not included in the current context.\n"
+                "- A caller, callee, type, test, or error-handling path is missing.\n"
+                "- Additional code could change the review conclusion.\n"
+                "Rules:\n"
+                "- Do not reread content already present in the conversation.\n"
+                "- Prefer a narrow line range when the relevant location is known.\n"
+                "- Do not use this for broad repository exploration."
             ),
             "parameters": {
                 "type": "object",
@@ -67,8 +86,12 @@ MCP_TOOL_DEFINITIONS = [
                         "type": "integer",
                         "description": "Last line to read (inclusive). Default 200.",
                     },
+                    "justification": {
+                        "type": "string",
+                        "description": "Why do you need to read this file? What specific information are you looking for?",
+                    }
                 },
-                "required": ["file_path"],
+                "required": ["file_path", "justification"],
             },
         },
     },
@@ -77,19 +100,28 @@ MCP_TOOL_DEFINITIONS = [
         "function": {
             "name": "find_references",
             "description": (
-                "Find all usages/references of a symbol (function, class, variable) "
-                "across the repository. Use to understand callers or consumers of a "
-                "changed function."
+                "Find references to a symbol in the target repository.\n"
+                "Use this when:\n"
+                "- A changed symbol's callers or callees affect correctness or security.\n"
+                "- You need to determine how a changed behavior propagates.\n"
+                "- You need to verify whether an authorization or validation function is used elsewhere.\n"
+                "Rules:\n"
+                "- Do not use this for general repository exploration.\n"
+                "- Do not repeat the same symbol lookup unless the search scope differs."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "symbol": {
                         "type": "string",
-                        "description": "Name of the symbol to search for, e.g. '_GUARDED_ACTION'",
+                        "description": "The exact function, class, or variable name.",
+                    },
+                    "justification": {
+                        "type": "string",
+                        "description": "Why do you need to find this symbol? What specific information are you looking for?",
                     }
                 },
-                "required": ["symbol"],
+                "required": ["symbol", "justification"],
             },
         },
     },
@@ -97,82 +129,69 @@ MCP_TOOL_DEFINITIONS = [
 
 # ── Specialist system prompts ──────────────────────────────────────────────────
 _SECURITY_SYSTEM_PROMPT = """\
-You are a senior security code reviewer with access to MCP tools for retrieving \
-repository context.
+You are a senior security code reviewer with access to MCP tools.
 
-You are reviewing a code diff. The initial context is INTENTIONALLY LIMITED — it \
-contains only the changed file and immediate surrounding code. This is by design.
+PHASE 1: INVESTIGATION
+- Inspect EVERY changed file and EVERY changed hunk.
+- Analyze the supplied diff and initial context first.
+- Use MCP ONLY when a concrete unresolved question may affect the review.
+- Incorporate every tool result into the next reasoning step.
+- Avoid retrieving content already provided. Avoid repeating identical tool calls.
+- Continue reviewing ALL changed hunks after finding an issue.
+- Do NOT produce final structured findings during the investigation phase.
 
-WORKFLOW:
-1. Review the diff and current context.
-2. If you need to understand what a changed constant, key, or identifier means, \
-call read_file ONCE to read the relevant file.
-3. After receiving the file contents, immediately analyze the evidence and return \
-your findings in JSON. Do NOT call any tool again after you have received the file.
-4. If you have no additional questions after the initial context, return findings directly.
+SYSTEMATIC COVERAGE REQUIRED:
+7. Authentication and authorization
+8. Injection and unsafe data flow
 
-CRITICAL RULES:
-- NEVER call the same tool with the same arguments more than once. If you already \
-received the content of a file, do NOT request it again.
-- Once you have read the policy/config file that defines a changed identifier, \
-IMMEDIATELY produce your findings — do not request more files unless strictly necessary.
-- Do NOT guess about the privilege level of opaque strings. Use read_file first.
-- Return a finding ONLY when supported by evidence from code you have actually read.
-- If context is still insufficient after tool calls, return {"findings": []}.
-- Only report genuine security vulnerabilities. Do NOT report general correctness bugs, logic errors, or style issues — those are handled by a separate reviewer.
+TOOL-USAGE POLICY:
+Before requesting a tool, identify the concrete uncertainty it resolves.
+- read_file: Use when a definition/caller/type is missing and could change the conclusion. Do NOT reread content already present. Prefer narrow line ranges.
+- find_references: Use when a changed symbol's usage affects correctness/security. Do NOT repeat the same lookup.
 
-AUTHORIZATION REVIEW FOCUS:
-When an authorization-related constant, action key, role, or policy identifier \
-changes and its definition is not visible in the diff, call read_file on the file \
-that defines it. Then compare the old value's privilege level to the new value's \
-privilege level. If the new value grants lower privilege than the old, report a \
-privilege escalation vulnerability.
-
-OUTPUT FORMAT (return ONLY this JSON, no markdown, no extra text):
-{"findings": [{"file": "src/auth.py", "line": 3, "title": "...", \
-"category": "security", "severity": "high", "confidence": 0.9, \
-"explanation": "...", "evidence": "...", "suggested_fix": "...", "source": "llm"}]}
-
-If no security vulnerability exists, return exactly: {"findings": []}"""
+PHASE 2: FINALIZATION
+(You will be explicitly instructed when this phase begins).
+- Reassess every changed file and hunk.
+- Incorporate all retrieved context.
+- Confirm or reject candidate findings. Remove speculative findings and duplicate root causes.
+- Every finding must include a concrete changed-line anchor (never null).
+"""
 
 _CORRECTNESS_SYSTEM_PROMPT = """\
-You are a senior correctness code reviewer with access to MCP tools for retrieving \
-repository context.
+You are a senior correctness code reviewer with access to MCP tools.
 
-You are reviewing a code diff. The initial context is INTENTIONALLY LIMITED — it \
-contains only the changed file and immediate surrounding code.
+PHASE 1: INVESTIGATION
+- Inspect EVERY changed file and EVERY changed hunk.
+- Analyze the supplied diff and initial context first.
+- Use MCP ONLY when a concrete unresolved question may affect the review.
+- Incorporate every tool result into the next reasoning step.
+- Avoid retrieving content already provided. Avoid repeating identical tool calls.
+- Continue reviewing ALL changed hunks after finding an issue.
+- Do NOT produce final structured findings during the investigation phase.
 
-CRITICAL INSTRUCTIONS:
-- Review EVERY changed file, EVERY changed function, and EVERY changed hunk.
-- Continue looking after finding one issue. Do NOT stop after the first finding.
-- Return ALL independent findings across all files in the diff.
-- If the behavior of changed code depends on a callee, type definition, invariant, \
-or external contract NOT provided in the current context, use MCP tools to retrieve it.
-- Use read_file to inspect relevant definitions. Use find_references to inspect callers.
-- Return a finding ONLY when supported by evidence from code you have actually read.
-- Only report genuine correctness bugs, NOT style issues.
-- Do NOT report security vulnerabilities (e.g. SQL injection, hardcoded secrets) — those are handled by a separate reviewer.
+SYSTEMATIC COVERAGE REQUIRED:
+1. Correctness and business logic
+2. Boundary conditions and off-by-one errors
+3. Null/None/undefined handling
+4. Error handling and exception behavior
+5. Resource cleanup and lifecycle management
+6. Input validation
+9. API and backward compatibility
+10. Concurrency and state consistency
+11. Test impact
 
-SYSTEMATIC CHECKLIST (Check for these specific classes of correctness bugs):
-1. Off-by-one errors and loop boundary conditions
-2. Null/None dereferences and missing existence checks
-3. Missing dictionary keys or out-of-bounds indexing
-4. Float equality and numeric precision correctness
-5. Resource leaks (unclosed files, network connections, etc.)
-6. Exception-path cleanup and swallowed exceptions
-7. Broken invariants or incorrect state transitions
-8. Incorrect return values or mismatched API contracts
-9. Incorrect boolean conditions or inverted logic
-10. Race conditions or thread-safety issues
+TOOL-USAGE POLICY:
+Before requesting a tool, identify the concrete uncertainty it resolves.
+- read_file: Use when a definition/caller/type is missing and could change the conclusion. Do NOT reread content already present. Prefer narrow line ranges.
+- find_references: Use when a changed symbol's usage affects correctness/security. Do NOT repeat the same lookup.
 
-AFTER gathering all necessary context and checking ALL hunks against the checklist, \
-return your final findings as JSON:
-
-{"findings": [{"file": "src/auth.py", "line": 3, "title": "...", \
-"category": "correctness", "severity": "high", "confidence": 0.9, \
-"explanation": "...", "evidence": "...", "suggested_fix": "...", "source": "llm"}]}
-
-If no correctness bug exists across all files, return: {"findings": []}"""
+PHASE 2: FINALIZATION
+(You will be explicitly instructed when this phase begins).
+- Reassess every changed file and hunk.
+- Incorporate all retrieved context.
+- Confirm or reject candidate findings. Remove speculative findings and duplicate root causes.
+- Every finding must include a concrete changed-line anchor (never null).
+"""
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -200,12 +219,15 @@ def _parse_findings_from_text(text: str, specialist: str) -> list | None:
     try:
         raw_json = json_match.group(1) if json_match.lastindex else json_match.group()
         data = json.loads(raw_json)
+        if "findings" not in data:
+            return None
         findings = data.get("findings", [])
         for f in findings:
             f.setdefault("reviewer", specialist)
             f.setdefault("source", "llm")
         return findings
-    except (json.JSONDecodeError, AttributeError):
+    except Exception as e:
+        logger.warning("Failed to parse findings json: %s", e)
         return None
 
 
@@ -248,6 +270,35 @@ def _get_model_name(llm) -> str:
 
 # ── Main iterative loop ────────────────────────────────────────────────────────
 
+def _compress_message_history(messages: list) -> None:
+    """Selective context management for LangChain/LangGraph agents.
+    
+    Compresses older ToolMessages to save tokens while keeping the most
+    recent interaction uncompressed. Never blindly deletes history, as the
+    LLM needs it for multi-hop reasoning.
+    """
+    if not messages:
+        return
+        
+    # Find the indices of all ToolMessages
+    tool_msg_indices = [i for i, msg in enumerate(messages) if getattr(msg, "type", "") == "tool" or isinstance(msg, ToolMessage)]
+    
+    if len(tool_msg_indices) <= 2:
+        # Not enough history to compress
+        return
+        
+    # Keep the last 2 tool messages uncompressed
+    indices_to_compress = tool_msg_indices[:-2]
+    
+    for idx in indices_to_compress:
+        msg = messages[idx]
+        if hasattr(msg, "content") and isinstance(msg.content, str):
+            if len(msg.content) > 1000:
+                # Keep the first 300 and last 300 chars, heavily summarize the middle
+                start = msg.content[:300]
+                end = msg.content[-300:]
+                msg.content = f"{start}\n\n... [CONTENT COMPRESSED (saved {len(msg.content)} chars) - Original available via tool re-fetch if strictly needed] ...\n\n{end}"
+
 async def run_iterative_reviewer(
     specialist: str,
     state: dict,
@@ -271,13 +322,22 @@ async def run_iterative_reviewer(
           - 'reviewer_latencies'
           - 'errors' or 'security_errors' (only on error)
     """
-    MAX_ITERATIONS = getattr(settings, "ITERATIVE_MAX_ITERATIONS", 5)
-    MAX_TOOL_CALLS = getattr(settings, "ITERATIVE_MAX_TOOL_CALLS", 5)
+    MAX_ITERATIONS = getattr(settings, "ITERATIVE_MAX_ITERATIONS", 3)
+    MAX_TOOL_CALLS = getattr(settings, "ITERATIVE_MAX_TOOL_CALLS", 3)
     MAX_TIMEOUT = getattr(settings, "ITERATIVE_REVIEW_TIMEOUT_SECONDS", 45)
 
     review_start = time.monotonic()
     executed_keys: set[str] = set()
     iteration = 0
+    mcp_calls = 0
+    unique_mcp_calls = 0
+    duplicate_mcp_calls = 0
+    retry_count = 0
+    fallback_count = 0
+    timeout_count = 0
+    llm_latency_ms = 0
+    mcp_latency_ms = 0
+    
     tool_call_count = 0
     llm_call_count = 0
     tools_used: list[str] = []
@@ -288,6 +348,12 @@ async def run_iterative_reviewer(
     force_final_next = False
     review_id = state.get("metadata", {}).get("review_id", "?")
     blocks = state.get("context_blocks", [])
+    
+    # We share a cache among parallel reviewers via state
+    tool_cache = state.get("tool_cache", {})
+    evidence_store = state.get("evidence_store", [])
+    # For cache keying, we need the repo SHA or at least the target_ref
+    cache_ref = state.get("target_ref", "HEAD")
 
     logger.info(
         "REVIEW_LOOP_START specialist=%s review_id=%s context_blocks=%d",
@@ -298,7 +364,32 @@ async def run_iterative_reviewer(
     system_prompt = (
         _SECURITY_SYSTEM_PROMPT if specialist == "security" else _CORRECTNESS_SYSTEM_PROMPT
     )
-    human_content = "Please review the following code changes:\n\n"
+    human_content = "### REVIEW METADATA\n"
+    human_content += f"- Repository: {state.get('repo_path', 'unknown').split('/')[-1]}\n"
+    human_content += f"- Base revision: {state.get('base_ref', 'unknown')}\n"
+    human_content += f"- Target revision: {state.get('target_ref', 'unknown')}\n"
+    human_content += f"- Review specialist: {specialist}\n"
+    human_content += f"- Review phase: investigation\n\n"
+    
+    changed_files = state.get("changed_files", [])
+    if changed_files:
+        human_content += "### CHANGED FILES\n"
+        for cf in changed_files:
+            human_content += f"- {cf.path}\n"
+        human_content += "\n"
+        
+    human_content += "### ALREADY AVAILABLE CONTEXT\n"
+    for block in blocks:
+        # We don't track explicit line ranges in block right now, but we can list the file
+        human_content += f"- {block.file_path}: (loaded around changed hunks)\n"
+    human_content += "\n"
+    
+    human_content += "### RULES\n"
+    human_content += "- Do not request content already included in the current context.\n"
+    human_content += "- Use MCP only for missing context that may change the review conclusion.\n"
+    human_content += "- Prefer narrow retrieval when the relevant location is known.\n\n"
+    
+    human_content += "### INITIAL CODE CHANGES\n\n"
     for block in blocks:
         human_content += f"File: {block.file_path}\n"
         human_content += f"```python\n{block.surrounding_code}\n```\n"
@@ -310,15 +401,106 @@ async def run_iterative_reviewer(
     ]
 
     llm = get_llm(provider)
+    evidence_package = state.get("evidence_package", {})
+    context_decisions = evidence_package.get("context_decisions", {})
+    raw_diff = state.get("raw_diff", "")
+    
+    all_sufficient = False
+    if context_decisions:
+        all_sufficient = all(d.get("decision") == "sufficient_from_diff" for d in context_decisions.values())
+    elif not context_decisions and raw_diff and len(raw_diff.splitlines()) < 100:
+        all_sufficient = True
+        
+    if all_sufficient:
+        logger.info("SPECIALIST_FAST_PATH specialist=%s — context is sufficient_from_diff. Bypassing tool loop.", specialist)
+        t_final = time.monotonic()
+        manifest = generate_context_manifest(evidence_store, specialist, include_content=True)
+        final_package_prompt = f"Based on the following retrieved evidence, provide your final structured findings:\n\n{manifest}\n\nNote: The Diff was marked as sufficient. Please analyze the diff directly."
+        final_messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=human_content),
+            HumanMessage(content=final_package_prompt)
+        ]
+        
+        try:
+            structured_result = await invoke_structured(provider, final_messages, ReviewFindings)
+            r_latency = int((time.monotonic() - t_final) * 1000)
+            
+            s_dict = structured_result.usage.model_dump() if structured_result.usage else {}
+            s_dict["reviewer"] = specialist
+            s_dict["iteration"] = 0
+            s_dict["llm_call_number"] = 1
+            s_dict.update(compute_token_breakdown(final_messages))
+            
+            final_findings = []
+            if structured_result.response:
+                for f in structured_result.response.findings:
+                    d = f.model_dump()
+                    d["reviewer"] = specialist
+                    d.setdefault("source", "llm")
+                    final_findings.append(d)
+                    
+            existing_latencies = dict(state.get("reviewer_latencies", {}))
+            existing_latencies[f"{specialist}_ms"] = r_latency
+            existing_latencies[f"{specialist}_loop"] = {
+                "specialist_name": specialist,
+                "llm_call_count": 1,
+                "tool_call_count": 0,
+                "iteration_count": 0,
+                "tools_used": [],
+                "context_files_retrieved": [],
+                "stop_reason": "sufficient_from_diff_fast_path",
+                "total_latency_ms": r_latency,
+                "finding_count": len(final_findings)
+            }
+            
+            return {
+                f"{specialist}_raw_findings": final_findings,
+                "llm_usages": [s_dict],
+                "reviewer_latencies": existing_latencies,
+                "timeline": [{"node": specialist, "event": "llm_call", "details": "invoke_structured (fast_path)", "latency_ms": r_latency, "tokens": s_dict.get("total_tokens", 0)}],
+                "llm_latency_ms": r_latency,
+                "mcp_calls": 0,
+                "unique_mcp_calls": 0,
+                "duplicate_mcp_calls": 0,
+                "agent_iterations": 0,
+                "retry_count": 0,
+                "fallback_count": 0,
+                "timeout_count": 0,
+                "mcp_latency_ms": 0,
+            }
+        except Exception as exc:
+            logger.error("Fast path structured extraction failed: %s", exc)
+
+
     model_name = _get_model_name(llm)
 
     # ── Main loop ──────────────────────────────────────────────────────────────
     new_timeline = []
+    
+    review_id = state.get("metadata", {}).get("review_id", "")
+    def _add_event(event_dict):
+        new_timeline.append(event_dict)
+        if review_id:
+            from datetime import datetime, timezone
+            try:
+                from sentinel.services.events import publish_event
+                sse_event = {
+                    "review_id": review_id,
+                    "reviewer": specialist,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    **event_dict
+                }
+                publish_event(review_id, sse_event)
+            except ImportError:
+                pass
+                
     while iteration < MAX_ITERATIONS:
         # Timeout guard
         elapsed = time.monotonic() - review_start
         if elapsed > MAX_TIMEOUT:
             stop_reason = "timeout"
+            timeout_count += 1
             logger.warning(
                 "SPECIALIST_LOOP_STOP reason=timeout specialist=%s elapsed_s=%.1f",
                 specialist, elapsed,
@@ -353,6 +535,10 @@ async def run_iterative_reviewer(
                 "(forcing findings output after %d tool calls)",
                 specialist, iteration, tool_call_count,
             )
+            
+            # Compress history before final verdict
+            messages = relevance_aware_compaction(messages)
+            
             try:
                 # Build a closing human message asking for the final verdict
                 closing_msg = HumanMessage(
@@ -367,13 +553,14 @@ async def run_iterative_reviewer(
                     provider, messages + [closing_msg], ReviewFindings
                 )
                 latency_ms = int((time.monotonic() - t_llm_start) * 1000)
+                llm_latency_ms += latency_ms
                 usage = structured_result.usage
                 usage.reviewer = specialist
                 usage_dict = usage.model_dump()
                 usage_dict["iteration"] = iteration
                 usage_dict["llm_call_number"] = llm_call_count
                 new_usages.append(usage_dict)
-                new_timeline.append({
+                _add_event({
                     "node": specialist,
                     "event": "llm_call",
                     "details": "invoke_structured (final)",
@@ -409,10 +596,21 @@ async def run_iterative_reviewer(
                 })
                 break
         else:
-            # Iteration 1: bind tools so the LLM can request context
+            # Iteration 1+: bind tools so the LLM can request context
             tool_llm = llm.bind_tools(MCP_TOOL_DEFINITIONS)
+            
+            # Compress older tool results to save tokens (Selective Context Management)
+            messages = relevance_aware_compaction(messages)
+            
+            
+            # Inject context manifest
+            manifest = generate_context_manifest(evidence_store, specialist, include_content=True)
+            current_messages = list(messages)
+            if isinstance(current_messages[0], SystemMessage):
+                current_messages[0] = SystemMessage(content=system_prompt + "\n\n" + manifest)
+                
             try:
-                response = await tool_llm.ainvoke(messages)
+                response = await safe_ainvoke(tool_llm, current_messages)
             except Exception as exc:
                 latency_ms = int((time.monotonic() - t_llm_start) * 1000)
                 logger.error(
@@ -427,14 +625,18 @@ async def run_iterative_reviewer(
                 break
             
             latency_ms = int((time.monotonic() - t_llm_start) * 1000)
+            llm_latency_ms += latency_ms
             usage = _normalize_usage(provider, model_name, response, latency_ms)
             usage.reviewer = specialist
             usage_dict = usage.model_dump()
+
             usage_dict["iteration"] = iteration
             usage_dict["llm_call_number"] = llm_call_count
+            breakdown = compute_token_breakdown(current_messages)
+            usage_dict.update(breakdown)
             new_usages.append(usage_dict)
             
-            new_timeline.append({
+            _add_event({
                 "node": specialist,
                 "event": "llm_call",
                 "details": "bind_tools",
@@ -459,14 +661,17 @@ async def run_iterative_reviewer(
                 tool_call_id = tc.get("id") or str(uuid4())
                 key = _tool_call_key(tool_name, tool_args)
 
-                # Duplicate detection
+                # Duplicate detection within this reviewer's current run
                 if key in executed_keys:
                     logger.warning(
                         "SPECIALIST_LOOP_STOP reason=duplicate_tool_call "
                         "specialist=%s tool=%s args=%s",
                         specialist, tool_name, tool_args,
                     )
-                    # Return the cached result once so the LLM has it, then stop
+                    duplicate_mcp_calls += 1
+                    # Give it a generic failure so it knows it failed, then force finalization
+                    tool_result = "ERROR: Duplicate tool call requested. You must output findings now."
+                    messages.append(ToolMessage(content=tool_result, tool_call_id=tool_call_id, name=tool_name))
                     stop_reason = "duplicate_tool_call"
                     hit_limit = True
                     break
@@ -482,26 +687,51 @@ async def run_iterative_reviewer(
                     hit_limit = True
                     break
 
-                # Execute the tool
+                # Cache check
+                global_cache_key = generate_evidence_cache_key(cache_ref, tool_name, tool_args)
+                cache_hit = False
                 t_tool = time.monotonic()
-                logger.info(
-                    "MCP_TOOL_EXECUTED tool=%s args=%s specialist=%s",
-                    tool_name, json.dumps(tool_args, sort_keys=True), specialist,
-                )
-                try:
-                    tool_result = await _execute_tool(mcp_client, tool_name, tool_args, repo_path)
-                except Exception as tool_exc:
-                    tool_result = f"ERROR: MCP tool {tool_name!r} failed: {tool_exc}"
-                    logger.error("MCP tool %r failed: %s", tool_name, tool_exc)
+                
+                if global_cache_key in tool_cache:
+                    logger.info("MCP_TOOL_CACHE_HIT tool=%s specialist=%s", tool_name, specialist)
+                    tool_result = tool_cache[global_cache_key]
+                    cache_hit = True
+                    mcp_calls += 1 # we still count it as a conceptual request
+                    # But don't increment unique_mcp_calls
+                    evidence_item = normalize_evidence(tool_name, tool_args, tool_result, specialist)
+                    evidence_store.append(evidence_item)
+                else:
+                    # Execute the tool
+                    logger.info(
+                        "MCP_TOOL_EXECUTED tool=%s args=%s specialist=%s",
+                        tool_name, json.dumps(tool_args, sort_keys=True), specialist,
+                    )
+                    try:
+                        tool_result = await _execute_tool(mcp_client, tool_name, tool_args, repo_path)
+                        tool_cache[global_cache_key] = tool_result
+                        
+                        # Normalize and store evidence
+                        evidence_item = normalize_evidence(tool_name, tool_args, tool_result, specialist)
+                        evidence_store.append(evidence_item)
+                        
+                    except Exception as tool_exc:
+                        tool_result = f"ERROR: MCP tool {tool_name!r} failed: {tool_exc}"
+                        logger.error("MCP tool %r failed: %s", tool_name, tool_exc)
+                        
+                    mcp_calls += 1
+                    unique_mcp_calls += 1
 
                 tool_duration_ms = int((time.monotonic() - t_tool) * 1000)
+                mcp_latency_ms += tool_duration_ms
+                
                 executed_keys.add(key)
-                new_timeline.append({
+                _add_event({
                     "node": specialist,
                     "event": "tool_call",
                     "details": f"{tool_name}({json.dumps(tool_args)})",
                     "latency_ms": tool_duration_ms,
-                    "tokens": 0
+                    "tokens": 0,
+                    "cache_hit": cache_hit
                 })
                 tool_call_count += 1
                 tools_used.append(tool_name)
@@ -543,65 +773,69 @@ async def run_iterative_reviewer(
             continue
 
         # ── Branch B: No tool calls — extract final findings ──────────────────
-        text = getattr(response, "content", "") or ""
-        parsed = _parse_findings_from_text(text, specialist)
-
-        if parsed is None:
-            # JSON not found in text — try one structured-output repair call
-            logger.warning(
-                "JSON parse failed for %s at iteration %d — attempting repair call",
-                specialist, iteration,
-            )
-            try:
-                repair_result = await invoke_structured(
-                    provider, messages + [response], ReviewFindings
-                )
-                repair_usage = repair_result.usage
-                repair_usage.reviewer = specialist
-                repair_usage_dict = repair_usage.model_dump()
-                repair_usage_dict["iteration"] = iteration
-                repair_usage_dict["llm_call_number"] = llm_call_count + 1
-                new_usages.append(repair_usage_dict)
-                llm_call_count += 1
-                
-                new_timeline.append({
-                    "node": specialist,
-                    "event": "llm_call",
-                    "details": "invoke_structured (repair)",
-                    "latency_ms": 0,  # approximate or can't easily measure here without t_repair
-                    "tokens": repair_usage_dict.get("total_tokens", 0)
-                })
-
-                repaired_findings = []
-                if repair_result.response:
-                    for f in repair_result.response.findings:
-                        d = f.model_dump()
-                        d["reviewer"] = specialist
-                        repaired_findings.append(d)
-                findings = repaired_findings
-                logger.info(
-                    "REPAIR_CALL_SUCCESS specialist=%s findings=%d",
-                    specialist, len(findings),
-                )
-            except Exception as repair_exc:
-                logger.error(
-                    "REPAIR_CALL_FAILED specialist=%s error=%s",
-                    specialist, repair_exc,
-                )
-                findings = []
-        else:
-            findings = parsed
-
-        stop_reason = "final_result"
         logger.info(
-            "SPECIALIST_FINAL_RESULT specialist=%s findings=%d "
-            "llm_call_count=%d tool_call_count=%d stop_reason=%s",
-            specialist, len(findings), llm_call_count, tool_call_count, stop_reason,
+            "SPECIALIST_FINISHED_TOOLS specialist=%s at iteration %d — forcing final structured output",
+            specialist, iteration,
         )
+        messages = relevance_aware_compaction(messages)
+        
+        try:
+            t_final = time.monotonic()
+            
+            # Create a compact evidence package for final extraction
+            compact_manifest = generate_context_manifest(evidence_store, specialist, include_content=True)
+            final_package_prompt = f"Based on the following retrieved evidence, provide your final structured findings:\n\n{compact_manifest}"
+            closing_msg = HumanMessage(content=final_package_prompt)
+            
+            # Do not send the entire ReAct transcript
+            final_messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=human_content),
+                closing_msg
+            ]
+            
+            structured_result = await invoke_structured(
+                provider, final_messages, ReviewFindings
+            )
+            r_latency = int((time.monotonic() - t_final) * 1000)
+            llm_latency_ms += r_latency
+            
+            s_usage = structured_result.usage
+            s_usage.reviewer = specialist
+            s_dict = s_usage.model_dump()
+
+            s_dict["iteration"] = iteration
+            s_dict["llm_call_number"] = llm_call_count + 1
+            breakdown = compute_token_breakdown(final_messages)
+            s_dict.update(breakdown)
+            new_usages.append(s_dict)
+            llm_call_count += 1
+            
+            _add_event({
+                "node": specialist,
+                "event": "llm_call",
+                "details": "invoke_structured (final)",
+                "latency_ms": r_latency,
+                "tokens": s_dict.get("total_tokens", 0)
+            })
+
+            final_findings = []
+            if structured_result.response:
+                for f in structured_result.response.findings:
+                    d = f.model_dump()
+                    d["reviewer"] = specialist
+                    d.setdefault("source", "llm")
+                    final_findings.append(d)
+            findings = final_findings
+            stop_reason = "final_result"
+        except Exception as exc:
+            logger.error("Final structured extraction failed: %s", exc, exc_info=True)
+            stop_reason = "provider_error"
+            
         break
 
     # Handle max_iterations exit or timeout
-    if stop_reason in ("unknown", "max_iterations", "timeout") and not findings:
+    if not findings:
         if stop_reason == "unknown":
             stop_reason = "max_iterations"
         logger.warning(
@@ -609,17 +843,31 @@ async def run_iterative_reviewer(
             "iteration=%d. Forcing final structured output.",
             stop_reason, specialist, iteration,
         )
+        
+        messages = relevance_aware_compaction(messages)
+        
         try:
-            closing_msg = HumanMessage(
-                content="Based on all the context retrieved above, now provide your final findings as JSON. Return ONLY the JSON object."
-            )
-            repair_result = await invoke_structured(provider, messages + [closing_msg], ReviewFindings)
+            fallback_count += 1
+            t_llm_start = time.monotonic()
             
-            new_timeline.append({
+            compact_manifest = generate_context_manifest(evidence_store, specialist, include_content=True)
+            final_package_prompt = f"Based on the following retrieved evidence, provide your final structured findings:\n\n{compact_manifest}"
+            
+            final_messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=human_content),
+                HumanMessage(content=final_package_prompt)
+            ]
+            
+            repair_result = await invoke_structured(provider, final_messages, ReviewFindings)
+            latency_ms = int((time.monotonic() - t_llm_start) * 1000)
+            llm_latency_ms += latency_ms
+            
+            _add_event({
                 "node": specialist,
                 "event": "llm_call",
                 "details": "invoke_structured (fallback)",
-                "latency_ms": 0,
+                "latency_ms": latency_ms,
                 "tokens": repair_result.usage.total_tokens if repair_result.usage else 0
             })
             
@@ -630,7 +878,7 @@ async def run_iterative_reviewer(
                     d.setdefault("source", "llm")
                     findings.append(d)
         except Exception as repair_exc:
-            logger.error("Final fallback structured call failed: %s", repair_exc)
+            logger.error("Final fallback structured call failed: %s", repair_exc, exc_info=True)
 
     total_latency_ms = int((time.monotonic() - review_start) * 1000)
 
@@ -663,6 +911,19 @@ async def run_iterative_reviewer(
         "llm_usages": new_usages,
         "reviewer_latencies": existing_latencies,
         "timeline": new_timeline,
+        
+        # New metrics additions
+        "mcp_calls": mcp_calls,
+        "unique_mcp_calls": unique_mcp_calls,
+        "duplicate_mcp_calls": duplicate_mcp_calls,
+        "agent_iterations": iteration,
+        "retry_count": retry_count,
+        "fallback_count": fallback_count,
+        "timeout_count": timeout_count,
+        "llm_latency_ms": llm_latency_ms,
+        "mcp_latency_ms": mcp_latency_ms,
+        "tool_cache": tool_cache,
+        "evidence_store": evidence_store,
     }
 
     # Write errors only if there are any (use the right key per specialist)

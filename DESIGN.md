@@ -324,3 +324,38 @@ Our evaluation architecture creates a strict separation between probabilistic lo
 
 **UI Integration:**
 Despite being separate for evaluation, Linter findings *can still appear in the actual review UI*. The product aggregates findings from all sources (LLM and Linter) so developers see a unified dashboard. The UI explicitly separates the source using a dedicated tag (`Linter`) rather than masquerading as AI-generated output.
+
+# Context Engineering Layer
+
+## The Context Engineering Problem
+In iterative ReAct agents, sending the full message history (including large ToolMessages for file reads) on every subsequent LLM call creates a severe input-token bottleneck. Even though the source files are small, the repeated accumulation of tool results leads to quadratic ($O(N^2)$) token growth, resulting in high latency, increased costs, and context dilution for the LLM.
+
+## The Three-Layer Approach
+To resolve the input-token bottleneck, we implemented a 3-layer architecture for context management:
+1. **Layer A (Full Working Context):** We only keep the initial task, the current diff, and the most recent 1-2 tool interactions fully intact in the active message array.
+2. **Layer B (Structured Evidence Store):** When an older tool call finishes, we normalize and persist the result into a separate `evidence_store` within the LangGraph `ReviewState`. This stores raw content outside the active LLM memory.
+3. **Layer C (Compact Context Manifest):** We inject a highly compressed manifest (summarizing the `evidence_store`) into the System Prompt on every iteration, providing the LLM with an overview of what was retrieved without paying the token cost of the full files.
+
+## Token Budget and Drop Policy
+- Configurable limits via `TokenBudgets` model.
+- `max_diff_tokens`: Limits the size of the initial git diff.
+- `max_evidence_items`: Restricts the total number of normalized evidence chunks.
+- **Drop Policy:** The system deterministically truncates old `ToolMessage`s from the active `messages` array, leaving only a placeholder pointing to the Context Manifest. Changed lines and critical evidence are never fully lost because they are permanently housed in the `evidence_store`.
+
+## Evidence Cache Key
+The cache key is explicitly tied to the repository revision to prevent cross-commit poisoning:
+`{commit_sha}:{tool_name}:{args_json}`
+
+## Baseline vs. Optimized Evaluation Results
+- **Baseline (Full-History Strategy):**
+  - High input tokens (~15,000+ per loop)
+  - Higher latency (~12 seconds)
+  - Lower precision (LLM gets distracted by massive context)
+- **Optimized (Evidence-Store/Manifest Strategy):**
+  - Dramatically lower input tokens (~4,000 per loop)
+  - Lower latency (~7 seconds)
+  - Higher recall and precision due to structured final-extraction prompting
+
+## Known Trade-Offs and Limitations
+- Relying on deterministic normalization (without an LLM) means the summary in the Context Manifest is generic (e.g., "Read src/api.py"). The LLM must infer what it found based on its memory, or re-fetch it if it forgets.
+- If the reviewer requests too many disjoint files, the `evidence_store` can still grow large, though much slower than replicating the full transcripts.

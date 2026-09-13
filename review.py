@@ -73,16 +73,35 @@ def main():
             details = ev.get("details", "")
             latency = ev.get("latency_ms", 0)
             tokens = ev.get("tokens", 0)
+            cache = " [cache_hit=true]" if ev.get("cache_hit") else (" [cache_hit=false]" if event == "tool_call" else "")
             
             token_str = f" [{tokens} tokens]" if tokens > 0 else ""
-            print(f"[{node}] {event} -> {details} ({latency}ms){token_str}")
+            print(f"[{node}] {event} -> {details} ({latency}ms){token_str}{cache}")
 
-    print("\n\n" + "=" * 60)
-    print("REVIEW COMPLETE")
+    print("\n" + "=" * 60)
+    print("REVIEW SUMMARY")
     print("=" * 60)
     
+    usage = data.get("usage", {})
+    if usage:
+        print(f"LLM calls: {usage.get('llm_calls', 0)}")
+        print(f"MCP calls: {usage.get('mcp_calls', 0)}")
+        print(f"Unique MCP calls: {usage.get('unique_mcp_calls', 0)}")
+        print(f"Duplicate MCP calls: {usage.get('duplicate_mcp_calls', 0)}")
+        print(f"Agent iterations: {usage.get('agent_iterations', 0)}")
+        print(f"LangGraph node executions: {usage.get('langgraph_node_executions', 0)}")
+        print(f"Retries: {usage.get('retry_count', 0)}")
+        print(f"Fallbacks: {usage.get('fallback_count', 0)}")
+        print(f"Timeouts: {usage.get('timeout_count', 0)}")
+        print(f"Input tokens: {usage.get('total_input_tokens', 0)}")
+        print(f"Output tokens: {usage.get('total_output_tokens', 0)}")
+        print(f"Total tokens: {usage.get('total_tokens', 0)}")
+        print(f"LLM latency: {usage.get('llm_latency_ms', 0)}ms")
+        print(f"MCP latency: {usage.get('mcp_latency_ms', 0)}ms")
+        print(f"Wall-clock latency: {usage.get('total_latency_ms', 0)}ms")
+    
     findings = data.get("findings", [])
-    print(f"Total Findings: {len(findings)}\n")
+    print(f"Findings: {len(findings)}\n")
     
     for i, f in enumerate(findings, 1):
         print(f"[{i}] {f.get('severity', 'UNKNOWN').upper()} | {f.get('category')} | {f.get('file')}:{f.get('line')}")

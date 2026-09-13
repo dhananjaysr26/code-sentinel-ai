@@ -1,41 +1,19 @@
-"""
-Django REST Framework views for CodeSentinel AI.
+import re
 
-Design principle: views are thin HTTP adapters.
-All domain logic lives in sentinel/ — NOT here.
+with open("backend/apps/reviews/views.py", "r") as f:
+    content = f.read()
 
-Endpoints:
-  POST   /api/reviews/                                 → run a review
-  GET    /api/reviews/{id}/                            → retrieve a review
-  POST   /api/reviews/{id}/findings/{fid}/feedback/   → accept / dismiss
-"""
-import logging
-
-from rest_framework import status
-from rest_framework.response import Response
-from rest_framework.views import APIView
-
+imports = """
 import threading
 import json
 from django.http import StreamingHttpResponse
 from django.db import close_old_connections
 from sentinel.services.events import publish_event, get_event_queue
+"""
 
+content = content.replace("from rest_framework.views import APIView", "from rest_framework.views import APIView\n" + imports)
 
-from .models import Review, ReviewFinding, ReviewUsage, LLMCallUsage
-from .serializers import (
-    ReviewSerializer,
-    ReviewCreateSerializer,
-    ReviewFindingSerializer,
-    FeedbackSerializer,
-)
-from sentinel.services.review_orchestrator import ReviewOrchestrator
-from sentinel.schemas.findings import Finding
-
-logger = logging.getLogger(__name__)
-
-
-
+run_func = """
 def _run_and_save_review(review_id, repo_path, base_ref, target_ref, llm_provider):
     try:
         from .models import Review, ReviewFinding, LLMCallUsage, ReviewUsage
@@ -142,35 +120,9 @@ def _run_and_save_review(review_id, repo_path, base_ref, target_ref, llm_provide
     finally:
         publish_event(str(review_id), {"type": "EOF"})
         close_old_connections()
+"""
 
-
-class ReviewListCreateView(APIView):
-    """POST /api/reviews/ — Trigger a new code review."""
-
-    def post(self, request):
-        # 1. Validate request
-        create_serializer = ReviewCreateSerializer(data=request.data)
-        if not create_serializer.is_valid():
-            return Response(
-                {"errors": create_serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        validated = create_serializer.validated_data
-        repo_path: str = validated["repo_path"]
-        base_ref: str = validated["base_ref"]
-        target_ref: str = validated["target_ref"]
-        llm_provider: str = validated["llm_provider"]
-
-        # 2. Create Review record in "running" state
-        review = Review.objects.create(
-            repo_path=repo_path,
-            base_ref=base_ref,
-            target_ref=target_ref,
-            status=Review.Status.RUNNING,
-        )
-
-        logger.info("[%s] Review created — %s %s..%s", review.id, repo_path, base_ref, target_ref)
+post_replacement = """        logger.info("[%s] Review created — %s %s..%s", review.id, repo_path, base_ref, target_ref)
 
         if request.GET.get("stream") == "true":
             threading.Thread(target=_run_and_save_review, args=(review.id, repo_path, base_ref, target_ref, llm_provider)).start()
@@ -183,60 +135,22 @@ class ReviewListCreateView(APIView):
         serializer = ReviewSerializer(review)
         response_status = status.HTTP_200_OK if review.status == Review.Status.COMPLETED else status.HTTP_500_INTERNAL_SERVER_ERROR
         return Response(serializer.data, status=response_status)
+"""
 
+# Extract the body of post and replace it
+new_content = re.sub(
+    r'        logger.info\("\[%s\] Review created — %s %s..%s", review.id, repo_path, base_ref, target_ref\)\n\n.*?        return Response\(serializer.data, status=response_status\)',
+    post_replacement,
+    content,
+    flags=re.DOTALL
+)
 
+# Insert the helper function before the class
+new_content = new_content.replace('class ReviewListCreateView(APIView):', run_func + '\n\nclass ReviewListCreateView(APIView):')
 
-class ReviewDetailView(APIView):
-    """GET /api/reviews/{pk}/ — Retrieve a review with its findings."""
-
-    def get(self, request, pk):
-        try:
-            review = Review.objects.prefetch_related("findings").get(pk=pk)
-        except Review.DoesNotExist:
-            return Response(
-                {"error": "Review not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        serializer = ReviewSerializer(review)
-        return Response(serializer.data)
-
-
-class FindingFeedbackView(APIView):
-    """POST /api/reviews/{review_pk}/findings/{finding_pk}/feedback/
-    
-    Records user accept/dismiss decision for a finding.
-    This feedback is persisted and is available as labelled evaluation data.
-    """
-
-    def post(self, request, review_pk, finding_pk):
-        serializer = FeedbackSerializer(data=request.data)
-        if not serializer.is_valid():
-            return Response(
-                {"errors": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            finding = ReviewFinding.objects.get(
-                pk=finding_pk, review_id=review_pk
-            )
-        except ReviewFinding.DoesNotExist:
-            return Response(
-                {"error": "Finding not found"},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
-        finding.feedback = serializer.validated_data["action"]
-        finding.save(update_fields=["feedback"])
-
-        logger.info(
-            "[%s] Finding %s feedback: %s", review_pk, finding_pk, finding.feedback
-        )
-
-        return Response(ReviewFindingSerializer(finding).data)
-
+stream_view = """
 class ReviewStreamView(APIView):
-    """GET /api/reviews/{review_id}/events/ — Stream SSE events for a review."""
+    \"\"\"GET /api/reviews/{review_id}/events/ — Stream SSE events for a review.\"\"\"
 
     def get(self, request, review_id):
         def event_stream():
@@ -244,10 +158,16 @@ class ReviewStreamView(APIView):
             while True:
                 event = q.get()
                 if event.get("type") == "EOF":
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(event)}\\n\\n"
                     break
-                yield f"data: {json.dumps(event)}\n\n"
+                yield f"data: {json.dumps(event)}\\n\\n"
         
         response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
         response['Cache-Control'] = 'no-cache'
         return response
+"""
+
+new_content = new_content + stream_view
+
+with open("backend/apps/reviews/views.py", "w") as f:
+    f.write(new_content)
