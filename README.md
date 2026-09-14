@@ -5,6 +5,8 @@ structured correctness findings through a LangGraph orchestration pipeline.
 
 ## Architecture
 
+![CodeSentinel AI Architecture](docs/images/system-overview.jpeg)
+
 ```
 User
   │
