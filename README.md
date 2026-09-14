@@ -94,7 +94,7 @@ pnpm install
 ## Environment Variables
 
 ```bash
-cp .env.example backend/.env
+cp backend/.env.example backend/.env
 # Edit backend/.env and set:
 #   OPENAI_API_KEY=sk-...
 #   DJANGO_SECRET_KEY=...
