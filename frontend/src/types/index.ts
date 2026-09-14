@@ -49,8 +49,10 @@ export interface ReviewUsage {
   total_output_tokens: number;
   total_tokens: number;
   total_latency_ms: number;
-  total_estimated_cost: number | null;
+  total_estimated_cost?: number | null;
   llm_calls: number;
+  tool_calls: number;
+  iterations: number;
   models_used: string[];
 }
 
@@ -85,6 +87,7 @@ export interface OverviewStats {
     avg_latency_s: number;
     avg_cost: number | null;
     total_calls: number;
+    total_tool_calls: number;
   };
   evaluation: {
     precision: number;

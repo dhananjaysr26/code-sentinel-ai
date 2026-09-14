@@ -438,17 +438,17 @@ export function OverviewPage() {
           {data.usage_metrics && (
             <Card>
               <SectionHead icon={BarChart3} title="AI Usage" />
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-2">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-2">
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Avg tokens / review</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Avg tokens / rev</p>
                   <p className="text-xl font-bold text-slate-900 font-mono">{data.usage_metrics.avg_tokens.toLocaleString()}</p>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Avg latency / review</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Avg latency / rev</p>
                   <p className="text-xl font-bold text-slate-900 font-mono">{data.usage_metrics.avg_latency_s.toFixed(1)}s</p>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Avg estimated cost</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Avg cost / rev</p>
                   <p className="text-xl font-bold text-slate-900 font-mono">
                     {data.usage_metrics.avg_cost !== null ? `$${data.usage_metrics.avg_cost.toFixed(4)}` : "N/A"}
                   </p>
@@ -456,6 +456,10 @@ export function OverviewPage() {
                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
                   <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total LLM calls</p>
                   <p className="text-xl font-bold text-slate-900 font-mono">{data.usage_metrics.total_calls.toLocaleString()}</p>
+                </div>
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-100">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Total MCP calls</p>
+                  <p className="text-xl font-bold text-slate-900 font-mono">{data.usage_metrics.total_tool_calls.toLocaleString()}</p>
                 </div>
               </div>
             </Card>

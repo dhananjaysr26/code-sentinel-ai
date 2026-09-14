@@ -53,6 +53,7 @@ class ReviewState(TypedDict):
 
     # ── Populated by build_context node ──────────────────────────────────────
     context_blocks: list[ContextBlock]
+    evidence_package: dict
 
     # ── Populated by correctness_review node (parallel) ──────────────────────
     correctness_raw_findings: list[dict]
@@ -67,9 +68,23 @@ class ReviewState(TypedDict):
     errors: Annotated[list[str], add]
     security_errors: Annotated[list[str], add]
     llm_usages: Annotated[list[dict], add]
+    timeline: Annotated[list[dict], add]
 
+    # Metrics
+    mcp_calls: Annotated[int, add]
+    unique_mcp_calls: Annotated[int, add]
+    duplicate_mcp_calls: Annotated[int, add]
+    agent_iterations: Annotated[int, add]
+    retry_count: Annotated[int, add]
+    fallback_count: Annotated[int, add]
+    timeout_count: Annotated[int, add]
+    llm_latency_ms: Annotated[int, add]
+    mcp_latency_ms: Annotated[int, add]
+    
     # ── Written by BOTH parallel reviewers — needs merge-dict reducer ─────────
     reviewer_latencies: Annotated[dict, _merge_dicts]
+    tool_cache: Annotated[dict, _merge_dicts]
+    evidence_store: Annotated[list, add]
 
     # ── Populated by merge_findings node ────────────────────────────────────
     raw_findings: list[dict]     # merged + ranked from both reviewers

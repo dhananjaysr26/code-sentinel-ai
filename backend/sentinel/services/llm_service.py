@@ -1,7 +1,24 @@
 import time
 import logging
+
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10), reraise=True)
+async def _execute_with_retry(llm_with_struct, messages):
+    return await llm_with_struct.ainvoke(messages)
+
 from typing import Any, Dict, List, Type
 from pydantic import BaseModel
+import tiktoken
+
+def estimate_tokens(text: str) -> int:
+    if not text: return 0
+    try:
+        enc = tiktoken.get_encoding('cl100k_base')
+        return len(enc.encode(text))
+    except:
+        return len(text) // 4
+
 
 from django.conf import settings
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
@@ -23,6 +40,16 @@ class LLMUsage(BaseModel):
     estimated_cost: float | None = None
     request_count: int = 1
     status: str = "success"
+    phase: str = ""
+    message_count: int = 0
+    source_code_tokens: int = 0
+    diff_tokens: int = 0
+    system_prompt_tokens: int = 0
+    reviewer_prompt_tokens: int = 0
+    tool_schema_tokens: int = 0
+    history_tokens: int = 0
+    tool_result_tokens: int = 0
+    structured_schema_tokens: int = 0
 
 class LLMInvocationResult(BaseModel):
     response: Any
@@ -99,36 +126,27 @@ async def invoke_structured(
     else:
         model_name = settings.OPENAI_MODEL
 
-    structured_llm = llm.with_structured_output(schema, include_raw=True)
-
     start_time = time.monotonic()
-    max_retries = 3
     
-    for attempt in range(max_retries):
-        try:
-            result = await structured_llm.ainvoke(messages)
-            latency_ms = int((time.monotonic() - start_time) * 1000)
-            
-            parsed = result.get("parsed")
-            raw = result.get("raw")
-            
-            usage = _normalize_usage(provider, model_name, raw, latency_ms)
-            return LLMInvocationResult(response=parsed, usage=usage)
-            
-        except Exception as e:
-            if attempt < max_retries - 1:
-                import asyncio
-                logger.warning(f"LLM invocation failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in 2s...")
-                await asyncio.sleep(2 * (attempt + 1))
-                continue
-                
-            latency_ms = int((time.monotonic() - start_time) * 1000)
-            logger.error(f"LLM invocation failed permanently after {max_retries} attempts: {e}")
-            usage = LLMUsage(
-                provider=provider,
-                model=model_name,
-                latency_ms=latency_ms,
-                status="failed",
-            )
-            raise RuntimeError(f"LLM error: {str(e)}", usage)
-
+    try:
+        structured_llm = llm.with_structured_output(schema, include_raw=True)
+        # Using Tenacity for robust exponential backoff as per expert pattern
+        result = await _execute_with_retry(structured_llm, messages)
+        latency_ms = int((time.monotonic() - start_time) * 1000)
+        
+        parsed = result.get("parsed")
+        raw = result.get("raw")
+        
+        usage = _normalize_usage(provider, model_name, raw, latency_ms)
+        return LLMInvocationResult(response=parsed, usage=usage)
+        
+    except Exception as e:
+        latency_ms = int((time.monotonic() - start_time) * 1000)
+        logger.error(f"LLM structured invocation failed permanently: {e}")
+        usage = LLMUsage(
+            provider=provider,
+            model=model_name,
+            latency_ms=latency_ms,
+            status="failed",
+        )
+        raise RuntimeError(f"LLM error: {str(e)}", usage)

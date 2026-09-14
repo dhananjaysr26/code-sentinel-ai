@@ -1,48 +1,38 @@
-"""
-LangGraph node: build_context
-
-Responsibility:
-  - Create an MCP client connected to the MCP server.
-  - For each diff hunk, retrieve surrounding source context via MCP.
-  - Apply token budget.
-  - Return ContextBlock list.
-
-This node demonstrates the LangGraph → MCP client → MCP server → repo data path.
-"""
 import logging
 import time
 from pathlib import Path
-
 from django.conf import settings
-
 from sentinel.graph.state import ReviewState
 from sentinel.mcp.client import StdioMCPClient
 from sentinel.context.builder import ContextBuilder
 from sentinel.schemas.context import ContextBudget
+from sentinel.graph.context_planner import run_context_planner
 
 logger = logging.getLogger(__name__)
 
-
 async def build_context_node(state: ReviewState) -> dict:
-    """Build context blocks for all diff hunks via MCP.
-    
-    Input state fields: diff_hunks, repo_path, metadata
-    Output state fields: context_blocks, errors, metadata
-    """
     start = time.monotonic()
     errors = list(state.get("errors", []))
     metadata = dict(state.get("metadata", {}))
     diff_hunks = state.get("diff_hunks", [])
+    raw_diff = state.get("raw_diff", "")
+    changed_files = [f["path"] if isinstance(f, dict) else f.path for f in state.get("changed_files", [])]
+
+    # Run Deterministic Context Planner
+    planned_evidence = run_context_planner(raw_diff, changed_files)
+    evidence_package = planned_evidence.model_dump()
 
     if not diff_hunks:
         logger.info("No diff hunks; skipping context building")
         metadata.setdefault("node_durations", {})["build_context"] = 0.0
-        return {"context_blocks": [], "errors": errors, "metadata": metadata}
+        return {
+            "evidence_package": evidence_package,
+            "context_blocks": [], 
+            "errors": errors, 
+            "metadata": metadata
+        }
 
-    # Resolve the MCP server script path
     server_script = str(Path(settings.MCP_SERVER_SCRIPT).resolve())
-    logger.debug("Using MCP server: %s", server_script)
-
     budget = ContextBudget(
         max_tokens=settings.CONTEXT_MAX_TOKENS,
         window_lines=settings.CONTEXT_WINDOW_LINES,
@@ -65,14 +55,8 @@ async def build_context_node(state: ReviewState) -> dict:
     duration = time.monotonic() - start
     metadata.setdefault("node_durations", {})["build_context"] = round(duration, 3)
 
-    logger.info(
-        "[%s] build_context complete: %d blocks in %.2fs",
-        metadata.get("review_id", "?"),
-        len(context_blocks),
-        duration,
-    )
-
     return {
+        "evidence_package": evidence_package,
         "context_blocks": context_blocks,
         "errors": errors,
         "metadata": metadata,

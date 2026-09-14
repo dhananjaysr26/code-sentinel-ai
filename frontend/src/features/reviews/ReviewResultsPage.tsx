@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { reviewsApi } from "../../api/client";
@@ -98,12 +98,26 @@ export function ReviewResultsPage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
   const [activeFilter, setActiveFilter] = useState<Severity | "ALL">("ALL");
+  const [hideLinter, setHideLinter] = useState<boolean>(false);
 
   const { data: review, isLoading, error, refetch } = useQuery({
     queryKey: ["review", id],
     queryFn: () => reviewsApi.getReview(id!),
     enabled: !!id,
+    refetchInterval: (query) => 
+      query.state.data?.status === "running" ? 2000 : false,
   });
+
+  const [liveLogs, setLiveLogs] = useState<any[]>([]);
+  useEffect(() => {
+    if (review?.status === "running") {
+      const cleanup = reviewsApi.listenToReviewEvents(id!, (event) => {
+        setLiveLogs(prev => [...prev, event]);
+      });
+      return cleanup;
+    }
+  }, [review?.status, id]);
+
 
   const feedbackMutation = useMutation({
     mutationFn: ({ findingId, action }: { findingId: string; action: "accept" | "dismiss" }) =>
@@ -138,10 +152,11 @@ export function ReviewResultsPage() {
     {} as Record<Severity, number>
   );
 
-  const filtered: Finding[] =
-    activeFilter === "ALL"
-      ? review.findings
-      : review.findings.filter((f) => f.severity === activeFilter);
+  const filtered: Finding[] = review.findings.filter((f) => {
+    if (hideLinter && f.source === "linter") return false;
+    if (activeFilter !== "ALL" && f.severity !== activeFilter) return false;
+    return true;
+  });
 
   const StatusIcon  = review.status === "completed" ? CheckCircle2 : review.status === "failed" ? XCircle : Clock;
   const statusBg    = review.status === "completed" ? "bg-emerald-50 border-emerald-200 text-emerald-700" : review.status === "failed" ? "bg-red-50 border-red-200 text-red-700" : "bg-blue-50 border-blue-200 text-blue-700";
@@ -226,6 +241,25 @@ export function ReviewResultsPage() {
                 </li>
               ))}
             </ul>
+            
+            <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
+              <label htmlFor="hide-linter" className="text-xs font-semibold text-slate-600 cursor-pointer">
+                Hide linter warnings
+              </label>
+              <button
+                id="hide-linter"
+                role="switch"
+                aria-checked={hideLinter}
+                onClick={() => setHideLinter(!hideLinter)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#6d5dfb] focus:ring-offset-2 ${hideLinter ? 'bg-[#6d5dfb]' : 'bg-slate-200'}`}
+              >
+                <span className="sr-only">Hide linter warnings</span>
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${hideLinter ? 'translate-x-2' : '-translate-x-2'}`}
+                />
+              </button>
+            </div>
           </div>
 
           {/* Review Metrics */}
@@ -241,6 +275,14 @@ export function ReviewResultsPage() {
                   <span className="font-mono font-medium text-slate-900">{review.usage.llm_calls}</span>
                 </div>
                 <div className="flex justify-between">
+                  <span>Iterations</span>
+                  <span className="font-mono font-medium text-slate-900">{review.usage.iterations}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>MCP Tool Calls</span>
+                  <span className="font-mono font-medium text-slate-900">{review.usage.tool_calls}</span>
+                </div>
+                <div className="flex justify-between">
                   <span>Total Tokens</span>
                   <span className="font-mono font-medium text-slate-900">{review.usage.total_tokens.toLocaleString()}</span>
                 </div>
@@ -251,8 +293,8 @@ export function ReviewResultsPage() {
                 <div className="flex justify-between">
                   <span>Est. Cost</span>
                   <span className="font-mono font-medium text-slate-900">
-                    {review.usage.total_estimated_cost !== null 
-                      ? `$${review.usage.total_estimated_cost.toFixed(4)}`
+                    {review.usage?.total_estimated_cost !== null 
+                      ? `$${review.usage?.total_estimated_cost?.toFixed(4)}`
                       : "N/A"}
                   </span>
                 </div>
@@ -281,7 +323,7 @@ export function ReviewResultsPage() {
 
           {/* Agent pipeline */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-            <ReviewerPipeline isRunning={false} />
+            <ReviewerPipeline isRunning={review.status === "running"} />
           </div>
 
           {/* Review meta */}
@@ -300,7 +342,31 @@ export function ReviewResultsPage() {
         {/* ── Findings list ────────────────────────────────────────── */}
         <div className="lg:col-span-3">
           <AnimatePresence mode="wait">
-            {filtered.length === 0 ? (
+            {review.status === "running" ? (
+              <motion.div
+                key="running"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 space-y-4"
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-4 h-4 border-2 border-[#6d5dfb] border-t-transparent rounded-full animate-spin"></div>
+                  <h3 className="text-sm font-semibold text-slate-800">Review in progress...</h3>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 h-64 overflow-y-auto font-mono text-[11px] text-slate-600 space-y-1 flex flex-col-reverse">
+                  {liveLogs.length === 0 && <div className="text-slate-400 italic">Starting agents...</div>}
+                  {liveLogs.slice().reverse().map((log, i) => (
+                    <div key={i} className="flex gap-3">
+                      <span className="text-slate-400 shrink-0">{new Date(log.timestamp || Date.now()).toLocaleTimeString()}</span>
+                      <span className="font-semibold text-slate-700 w-24 shrink-0 truncate uppercase">{log.reviewer || log.node}</span>
+                      <span className="text-[#6d5dfb] truncate">{log.event}:</span>
+                      <span className="text-slate-700 truncate">{log.details}</span>
+                    </div>
+                  ))}
+                </div>
+              </motion.div>
+            ) : filtered.length === 0 ? (
               <motion.div
                 key="empty"
                 initial={{ opacity: 0 }}

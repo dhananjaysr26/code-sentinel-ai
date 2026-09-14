@@ -4,7 +4,6 @@ import type { CreateReviewRequest, Review } from "../types";
 import { reviewsApi } from "../api/client";
 import { Loader2, FolderGit2, GitBranch, GitMerge, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ReviewerPipeline } from "./ReviewerPipeline";
 
 interface Props {
   onReviewComplete: (review: Review) => void;
@@ -147,19 +146,7 @@ export function ReviewForm({ onReviewComplete }: Props) {
         </button>
       </div>
 
-      {/* ── Running pipeline inline ──────────────────────────────────── */}
-      <AnimatePresence>
-        {mutation.isPending && (
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="p-5 rounded-[10px] bg-slate-50 border border-slate-200 shadow-[inset_0_1px_2px_rgba(0,0,0,0.02)]"
-          >
-            <ReviewerPipeline isRunning />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      
 
       {/* ── Error ───────────────────────────────────────────────────── */}
       <AnimatePresence>

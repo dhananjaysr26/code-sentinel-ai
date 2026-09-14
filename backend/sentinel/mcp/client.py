@@ -43,7 +43,7 @@ class MCPClientInterface(ABC):
         
     @abstractmethod
     async def run_linter(
-        self, repo_path: str, path: str
+        self, repo_path: str, path: str, revision: str = None
     ) -> str:
         """Run a deterministic lint tool against a repository file."""
         ...
@@ -181,19 +181,23 @@ class StdioMCPClient(MCPClientInterface):
         return result
 
     async def run_linter(
-        self, repo_path: str, path: str
+        self, repo_path: str, path: str, revision: str = None
     ) -> str:
         """Run a deterministic lint tool via MCP server."""
         import time
         start_time = time.monotonic()
         logger.info(f"LINTER_START path={path} tool=ruff")
         
+        args = {
+            "repo_path": repo_path,
+            "path": path,
+        }
+        if revision is not None:
+            args["revision"] = revision
+            
         result = await self._call_tool(
             "run_linter",
-            {
-                "repo_path": repo_path,
-                "path": path,
-            },
+            args,
         )
         
         latency_ms = int((time.monotonic() - start_time) * 1000)

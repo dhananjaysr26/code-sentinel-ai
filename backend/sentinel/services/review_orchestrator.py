@@ -66,7 +66,21 @@ class ReviewOrchestrator:
             "errors": [],
             "security_errors": [],
             "llm_usages": [],
+            "timeline": [],
+            
+            # Metrics
+            "mcp_calls": 0,
+            "unique_mcp_calls": 0,
+            "duplicate_mcp_calls": 0,
+            "agent_iterations": 0,
+            "retry_count": 0,
+            "fallback_count": 0,
+            "timeout_count": 0,
+            "llm_latency_ms": 0,
+            "mcp_latency_ms": 0,
+            
             "reviewer_latencies": {},
+            "tool_cache": {},
             "metadata": {
                 "review_id": review_id,
                 "start_time": datetime.now(timezone.utc).isoformat(),
@@ -80,6 +94,17 @@ class ReviewOrchestrator:
         metadata = dict(final_state.get("metadata", {}))
         metadata["total_duration_seconds"] = round(duration, 3)
         metadata["finding_count"] = len(final_state.get("findings", []))
+        metadata["reviewer_latencies"] = final_state.get("reviewer_latencies", {})
+        metadata["timeline"] = final_state.get("timeline", [])
+        
+        # Extract metrics
+        for metric in [
+            "mcp_calls", "unique_mcp_calls", "duplicate_mcp_calls",
+            "agent_iterations", "retry_count", "fallback_count",
+            "timeout_count", "llm_latency_ms", "mcp_latency_ms",
+            "langgraph_node_executions"
+        ]:
+            metadata[metric] = final_state.get(metric, 0)
 
         logger.info(
             "[%s] Review complete — %d findings in %.2fs",

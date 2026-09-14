@@ -19,7 +19,7 @@ export const DiffBlockSchema = z.object({
 export const RationaleBlockSchema = z.object({
   type: z.literal("rationale"),
   explanation: z.string(),
-  suggested_fix: z.string().optional(),
+  suggested_fix: z.string().nullable().optional(),
 });
 
 // 4. Metadata Block (Confidence score and source)

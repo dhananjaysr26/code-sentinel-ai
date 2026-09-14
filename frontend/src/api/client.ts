@@ -37,12 +37,38 @@ export const reviewsApi = {
    * Note: This is a long-running operation (may take 30–120s).
    */
   createReview: async (request: CreateReviewRequest): Promise<Review> => {
-    const res = await fetch(`${BASE_URL}/reviews/`, {
+    // Start the review in background mode
+    const res = await fetch(`${BASE_URL}/reviews/?stream=true`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(request),
     });
-    return handleResponse<Review>(res);
+    
+    if (!res.ok) {
+        return handleResponse<Review>(res);
+    }
+    
+    return res.json() as Promise<Review>; // Resolves immediately!
+  },
+
+  listenToReviewEvents: (reviewId: string, onEvent: (eventData: any) => void) => {
+    const evtSource = new EventSource(`${BASE_URL}/reviews/${reviewId}/events/`);
+    evtSource.onmessage = (event) => {
+        try {
+            const eventData = JSON.parse(event.data);
+            if (eventData.type === "EOF") {
+                evtSource.close();
+            } else {
+                onEvent(eventData);
+            }
+        } catch (err) {
+            console.error("SSE parse error", err);
+        }
+    };
+    evtSource.onerror = () => {
+        evtSource.close();
+    };
+    return () => evtSource.close();
   },
 
   /**
