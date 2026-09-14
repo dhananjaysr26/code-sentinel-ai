@@ -151,19 +151,69 @@ curl -X POST http://localhost:8000/api/reviews/ \
 
 ## Running the Evaluation
 
+CodeSentinel AI provides two ways to evaluate the system against our seeded repositories: via the **Web UI** or via the **Terminal**.
+
+### Option 1: Testing from the Web UI
+
+1. Start both the Django backend and the React frontend (see the "Running" section above).
+2. Open the UI at `http://localhost:5173`.
+3. Click **"New Review"**.
+4. Enter the absolute path to one of the test repositories (e.g., `/absolute/path/to/test-repo/breakableflask`).
+5. Set the Base to the previous commit (e.g., `HEAD~1` or `b3297f7~1`) and Target to the vulnerable commit (e.g., `HEAD` or `b3297f7`).
+6. Click Submit. The LangGraph orchestration will run in real-time, executing MCP tool calls in the background, and will render the findings natively in the UI with severity badges and linter filtering options.
+
+### Option 2: Testing from the Terminal (`evaluate.py`)
+
+For automated, headless stability testing across multiple runs, use the unified `evaluate.py` script. 
+Make sure your virtual environment is active first:
 ```bash
-# Ensure Django is running, then:
-cd /path/to/code-sentinel-ai
-python evals/run_eval.py --repo-path evals/seed_repo
-# Results written to: evals/results/eval_results.json
+cd backend
+source .venv/bin/activate
+cd ..
 ```
 
-## Running Stability Test
-
+**Evaluate a specific repository (e.g., single-js):**
 ```bash
-python evals/stability_test.py --repo-path evals/seed_repo --runs 3
-# Results written to: evals/results/stability_results.json
+python evaluate.py \
+  --repo /Users/dhananjaysingh/uncoders/AI_APP/code-sentinel-ai/test-repo/single-js \
+  --base HEAD~1 \
+  --target HEAD \
+  --runs 3 \
+  --provider openai
 ```
+
+**Commands for all 5 test repositories:**
+
+1. **auth-bypass**
+```bash
+python evaluate.py --repo $(pwd)/test-repo/auth-bypass --base HEAD~1 --target HEAD --runs 3
+```
+
+2. **multi-loop**
+```bash
+python evaluate.py --repo $(pwd)/test-repo/multi-loop --base HEAD~1 --target HEAD --runs 3
+```
+
+3. **seed_repo**
+```bash
+python evaluate.py --repo $(pwd)/test-repo/seed_repo --base HEAD~1 --target HEAD --runs 3
+```
+
+4. **single-js**
+```bash
+python evaluate.py --repo $(pwd)/test-repo/single-js --base HEAD~1 --target HEAD --runs 3
+```
+
+5. **breakableflask**
+```bash
+python evaluate.py --repo $(pwd)/test-repo/breakableflask --base b3297f7~1 --target b3297f7 --runs 3
+```
+
+**Evaluate ALL 5 repositories automatically in a single command:**
+```bash
+python evaluate.py --all --runs 3
+```
+This will iterate through the entire suite, run the evaluation 3 times per repository, and output aggregated token usage, latency, and standard deviation metrics for finding stability.
 
 ## Running Tests
 
@@ -231,23 +281,5 @@ The MCP server exposes the following tools:
 }
 ```
 
-
-    # Make sure to activate the virtual environment first
-    source backend/.venv/bin/activate
-
-    # Run the review tool
-    python review.py \
-      --repo /Users/dhananjaysingh/Uncoders/AI_APP/code-sentinel-ai/test-repo/multi-loop \
-      --base HEAD~1 \
-      --target HEAD \
-      --provider openai
-
-  If you want to quickly compare it with Bedrock, just change the provider flag:
-
-    python review.py \
-      --repo /Users/dhananjaysingh/Uncoders/AI_APP/code-sentinel-ai/test-repo/multi-loop \
-      --base HEAD~1 \
-      --target HEAD \
-      --provider bedrock
 ### Advanced Context Engineering
 CodeSentinel AI leverages a 3-Layer Selective Context architecture to minimize input token explosion during deep multi-hop reasoning. Instead of blindly sending full file transcripts on every loop, the agent normalizes retrieved files into an `evidence_store` and injects a heavily compressed Context Manifest into the prompt. This keeps context windows small, latency low, and drastically reduces token costs while maintaining high recall.
